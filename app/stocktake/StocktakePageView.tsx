@@ -1,10 +1,12 @@
-"use client";
+﻿"use client";
 
-import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import Image from "next/image";
 
 import { PageTitle } from "@/components/page-title";
 import { StatusChip } from "@/components/status-chip";
 import { formatDate, formatMoney } from "@/lib/format";
+import { getMockAssetOptions } from "@/lib/mock-assets-service";
 import {
   addMockStocktakeMeetingDoc,
   addMockStocktakeParticipant,
@@ -13,7 +15,9 @@ import {
   getMockStocktakeThreeTabs,
   getMockStocktakeWorkspace,
   getOrCreateMockStocktakeYearConfig,
+  importMockStocktakeAccountingStatuses,
   importMockStocktakeCsv,
+  listMockStocktakeAssetByCostCenter,
   markMockStocktakeReportGenerated,
   removeMockStocktakeParticipant,
   upsertMockStocktakeRecord,
@@ -28,14 +32,42 @@ const statusOptions: StocktakeRecordView["StatusCode"][] = [
   "OTHER",
 ];
 
+const EMPTY_WORKSPACE: ReturnType<typeof getMockStocktakeWorkspace> = {
+  config: null,
+  records: [],
+  participants: [],
+  meetingDocs: [],
+  summary: [],
+  accountingSummary: [],
+};
+
+const EMPTY_TABS: ReturnType<typeof getMockStocktakeThreeTabs> = {
+  counted: [],
+  notCounted: [],
+  rejected: [],
+};
+
+const subscribeHydration = () => () => {};
+
+function downloadTextFile(fileName: string, text: string) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function StocktakePageView() {
-  const currentYear = new Date().getFullYear();
+  const currentYear = new Date().getUTCFullYear();
   const [plantId, setPlantId] = useState("Plant-KLS");
   const [stocktakeYear, setStocktakeYear] = useState(currentYear);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [message, setMessage] = useState("");
 
+  const [countCostCenter, setCountCostCenter] = useState("");
   const [assetNo, setAssetNo] = useState("");
   const [statusCode, setStatusCode] = useState<StocktakeRecordView["StatusCode"]>("COUNTED");
   const [countMethod, setCountMethod] = useState<StocktakeRecordView["CountMethod"]>("QR");
@@ -44,15 +76,57 @@ export default function StocktakePageView() {
   const [countedBy, setCountedBy] = useState("asset.accounting@mitrphol.com");
   const [imageNames, setImageNames] = useState("");
   const [csvText, setCsvText] = useState("");
+  const [accountingCsvText, setAccountingCsvText] = useState("");
 
   const [participantEmail, setParticipantEmail] = useState("");
   const [meetingDocName, setMeetingDocName] = useState("");
   const [qrType, setQrType] = useState("STICKER");
   const [qrAssetNo, setQrAssetNo] = useState("");
+  const [qrScanValue, setQrScanValue] = useState("");
+  const [qrImageUrl, setQrImageUrl] = useState("");
 
-  getOrCreateMockStocktakeYearConfig(plantId, stocktakeYear);
-  const workspace = getMockStocktakeWorkspace(plantId, stocktakeYear);
-  const tabs = getMockStocktakeThreeTabs(plantId, stocktakeYear);
+  const hydrated = useSyncExternalStore(
+    subscribeHydration,
+    () => true,
+    () => false,
+  );
+
+  const workspace = hydrated
+    ? (() => {
+        getOrCreateMockStocktakeYearConfig(plantId, stocktakeYear);
+        return getMockStocktakeWorkspace(plantId, stocktakeYear);
+      })()
+    : EMPTY_WORKSPACE;
+
+  const tabs = hydrated ? getMockStocktakeThreeTabs(plantId, stocktakeYear) : EMPTY_TABS;
+  const allAssets = useMemo(() => (hydrated ? getMockAssetOptions() : []), [hydrated]);
+
+  const costCenters = useMemo(
+    () => Array.from(new Set(allAssets.map((x) => x.CostCenterName).filter(Boolean))).sort(),
+    [allAssets],
+  );
+
+  const assetsInCostCenter = useMemo(() => {
+    if (!countCostCenter) return [];
+    return listMockStocktakeAssetByCostCenter(plantId, stocktakeYear, countCostCenter);
+  }, [countCostCenter, plantId, stocktakeYear]);
+
+  useEffect(() => {
+    if (!costCenters.length) return;
+    if (!countCostCenter || !costCenters.includes(countCostCenter)) {
+      setCountCostCenter(costCenters[0]);
+    }
+  }, [costCenters, countCostCenter]);
+
+  useEffect(() => {
+    if (!assetsInCostCenter.length) {
+      setAssetNo("");
+      return;
+    }
+    if (!assetsInCostCenter.some((x) => x.AssetNo === assetNo)) {
+      setAssetNo(assetsInCostCenter[0].AssetNo);
+    }
+  }, [assetsInCostCenter, assetNo]);
 
   const filteredRecords = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -60,7 +134,7 @@ export default function StocktakePageView() {
       const byStatus = statusFilter === "ALL" || row.StatusCode === statusFilter;
       const bySearch =
         !keyword ||
-        [row.AssetNo, row.AssetName, row.CostCenterName, row.NoteText]
+        [row.AssetNo, row.AssetName, row.CostCenterName, row.NoteText, row.AccountingStatusCode]
           .join(" ")
           .toLowerCase()
           .includes(keyword);
@@ -69,9 +143,36 @@ export default function StocktakePageView() {
   }, [workspace.records, statusFilter, search]);
 
   const qrValue = useMemo(() => {
-    if (!qrAssetNo.trim()) return "-";
+    if (!qrAssetNo.trim()) return "";
     return `QR|${qrType}|${plantId}|${stocktakeYear}|${qrAssetNo.trim()}`;
   }, [qrAssetNo, qrType, plantId, stocktakeYear]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function generateQr() {
+      if (!qrValue) {
+        if (isMounted) setQrImageUrl("");
+        return;
+      }
+      try {
+        const qrcode = await import("qrcode");
+        const url = await qrcode.toDataURL(qrValue, {
+          width: 260,
+          margin: 1,
+          errorCorrectionLevel: "M",
+        });
+        if (isMounted) setQrImageUrl(url);
+      } catch {
+        if (isMounted) setQrImageUrl("");
+      }
+    }
+
+    generateQr();
+    return () => {
+      isMounted = false;
+    };
+  }, [qrValue]);
 
   function notify(text: string) {
     setMessage(text);
@@ -80,6 +181,7 @@ export default function StocktakePageView() {
   function onSubmitCount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
+      if (!assetNo.trim()) throw new Error("Please choose asset");
       upsertMockStocktakeRecord({
         plantId,
         stocktakeYear,
@@ -94,7 +196,6 @@ export default function StocktakePageView() {
           .map((x) => x.trim())
           .filter(Boolean),
       });
-      setAssetNo("");
       setNoteText("");
       setImageNames("");
       notify("Saved stocktake record.");
@@ -118,21 +219,63 @@ export default function StocktakePageView() {
     }
   }
 
+  function onImportAccountingCsv() {
+    try {
+      const result = importMockStocktakeAccountingStatuses({
+        plantId,
+        stocktakeYear,
+        csvText: accountingCsvText,
+      });
+      notify(`Imported accounting status ${result.imported} rows. ${result.errors.length ? `Errors: ${result.errors.join(" | ")}` : ""}`);
+      setAccountingCsvText("");
+    } catch (error) {
+      notify((error as Error).message);
+    }
+  }
+
   function onImportCsvFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      setCsvText(String(reader.result || ""));
-    };
+    reader.onload = () => setCsvText(String(reader.result || ""));
     reader.readAsText(file);
+  }
+
+  function onImportAccountingFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setAccountingCsvText(String(reader.result || ""));
+    reader.readAsText(file);
+  }
+
+  function onUseScannedQr() {
+    const parts = qrScanValue.trim().split("|");
+    if (parts.length !== 5 || parts[0] !== "QR") {
+      notify("Invalid QR format. Expected QR|TYPE|PLANT|YEAR|ASSET_NO");
+      return;
+    }
+    const scannedAssetNo = parts[4]?.trim();
+    if (!scannedAssetNo) {
+      notify("QR does not contain asset no");
+      return;
+    }
+    const asset = allAssets.find((x) => x.AssetNo === scannedAssetNo);
+    if (!asset) {
+      notify("Asset from QR is not found in mock asset master");
+      return;
+    }
+    setCountMethod("QR");
+    setAssetNo(asset.AssetNo);
+    setCountCostCenter(asset.CostCenterName || "");
+    notify(`Loaded asset ${asset.AssetNo} from scanned QR`);
   }
 
   return (
     <>
       <PageTitle
-        title="Stocktake Menu (Mock)"
-        subtitle="ครบงานเร่งด่วน: QR, Year config, scan/manual, excel import, participants, meeting docs, 3-tab report"
+        title="การตรวจนับทรัพย์สิน"
+        subtitle="QR Generation, รอบปี, บันทึกผลนับ, Import Excel และ Import สถานะทางบัญชี"
       />
 
       {message ? (
@@ -154,6 +297,7 @@ export default function StocktakePageView() {
           <div className="kpi">
             <h3>Config</h3>
             <p>{workspace.config?.IsOpen ? "OPEN" : "CLOSED"}</p>
+            <p className="muted mt-1">Report: {workspace.config?.ReportGeneratedAt ? "READY" : "MISSING"}</p>
           </div>
           <div className="kpi">
             <h3>Records</h3>
@@ -163,7 +307,7 @@ export default function StocktakePageView() {
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>1) QR Generation</h3>
+        <h3 className="mb-2.5">1) Generate QR (Sticker/A4/A5)</h3>
         <div className="form-grid">
           <div className="field">
             <label>QR Type</label>
@@ -179,13 +323,49 @@ export default function StocktakePageView() {
           </div>
           <div className="field">
             <label>Generated QR Value</label>
-            <input value={qrValue} disabled />
+            <input value={qrValue || "-"} disabled />
+          </div>
+          <div className="field">
+            <label>Mobile Scan Payload (paste)</label>
+            <input
+              value={qrScanValue}
+              onChange={(e) => setQrScanValue(e.target.value)}
+              placeholder="QR|STICKER|Plant-KLS|2026|100-001-2020"
+            />
           </div>
         </div>
+
+        <div className="chip-list mt-3">
+          <button className="button button--ghost" type="button" onClick={onUseScannedQr}>
+            Use Scanned QR
+          </button>
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={() => {
+              if (!qrValue || !qrImageUrl) {
+                notify("Please enter asset no before download QR");
+                return;
+              }
+              const a = document.createElement("a");
+              a.href = qrImageUrl;
+              a.download = `qr-${qrAssetNo || "asset"}-${qrType}.png`;
+              a.click();
+            }}
+          >
+            Download QR PNG
+          </button>
+        </div>
+
+        {qrImageUrl ? (
+          <div className="mt-3 rounded-xl border border-[#d8e6f4] bg-white p-3">
+            <Image src={qrImageUrl} alt={`QR ${qrValue}`} width={220} height={220} unoptimized />
+          </div>
+        ) : null}
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>2) Year Config and Close/Open</h3>
+        <h3 className="mb-2.5">2) Year Config and Close/Open</h3>
         <div className="form-grid">
           <div className="field">
             <label>Plant</label>
@@ -196,25 +376,12 @@ export default function StocktakePageView() {
             <input type="number" value={stocktakeYear} onChange={(e) => setStocktakeYear(Number(e.target.value))} />
           </div>
           <div className="field">
-            <label>Closed By</label>
+            <label>Actor</label>
             <input value={countedBy} onChange={(e) => setCountedBy(e.target.value)} />
           </div>
         </div>
-        <div className="chip-list" style={{ marginTop: 12 }}>
-          <button
-            className="button button--ghost"
-            type="button"
-            onClick={() => {
-              try {
-                closeMockStocktakeYear(plantId, stocktakeYear, countedBy);
-                notify("Closed stocktake year.");
-              } catch (error) {
-                notify((error as Error).message);
-              }
-            }}
-          >
-            Close Year
-          </button>
+
+        <div className="chip-list mt-3">
           <button
             className="button button--ghost"
             type="button"
@@ -234,6 +401,20 @@ export default function StocktakePageView() {
             type="button"
             onClick={() => {
               try {
+                closeMockStocktakeYear(plantId, stocktakeYear, countedBy);
+                notify("Closed stocktake year.");
+              } catch (error) {
+                notify((error as Error).message);
+              }
+            }}
+          >
+            Close Year
+          </button>
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={() => {
+              try {
                 const carried = carryPendingToNextMockYear(plantId, stocktakeYear, stocktakeYear + 1, countedBy);
                 notify(`Opened ${stocktakeYear + 1} and carried ${carried} pending record(s).`);
               } catch (error) {
@@ -247,12 +428,30 @@ export default function StocktakePageView() {
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>3) Count Entry (QR / Manual / Excel)</h3>
+        <h3 className="mb-2.5">3) Count Entry (Web: select Cost Center + Asset)</h3>
         <form onSubmit={onSubmitCount}>
           <div className="form-grid">
             <div className="field">
-              <label>Asset No</label>
-              <input value={assetNo} onChange={(e) => setAssetNo(e.target.value)} required />
+              <label>Cost Center</label>
+              <select value={countCostCenter} onChange={(e) => setCountCostCenter(e.target.value)}>
+                {!costCenters.length ? <option value="">No cost center</option> : null}
+                {costCenters.map((cca) => (
+                  <option key={cca} value={cca}>
+                    {cca}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Asset</label>
+              <select value={assetNo} onChange={(e) => setAssetNo(e.target.value)}>
+                {!assetsInCostCenter.length ? <option value="">No assets in selected cost center</option> : null}
+                {assetsInCostCenter.map((asset) => (
+                  <option key={asset.AssetId} value={asset.AssetNo}>
+                    {asset.AssetNo} - {asset.AssetName}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="field">
               <label>Status Code</label>
@@ -289,7 +488,7 @@ export default function StocktakePageView() {
               <input value={noteText} onChange={(e) => setNoteText(e.target.value)} />
             </div>
           </div>
-          <div style={{ marginTop: 12 }}>
+          <div className="mt-3">
             <button className="button button--primary" type="submit">
               Save Count
             </button>
@@ -298,24 +497,53 @@ export default function StocktakePageView() {
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>4) Excel Import (CSV mock)</h3>
+        <h3 className="mb-2.5">4) Import Count from Excel (CSV)</h3>
         <div className="field">
           <label>Upload file (.csv)</label>
           <input type="file" accept=".csv,.txt" onChange={onImportCsvFile} />
         </div>
-        <div className="field" style={{ marginTop: 10 }}>
-          <label>CSV text format: assetNo,statusCode,note,method,qty</label>
+        <div className="field mt-2.5">
+          <label>CSV: assetNo,statusCode,note,method,qty</label>
           <textarea value={csvText} onChange={(e) => setCsvText(e.target.value)} />
         </div>
-        <div style={{ marginTop: 12 }}>
+        <div className="mt-3">
           <button className="button button--ghost" type="button" onClick={onImportCsv}>
-            Import CSV
+            Import Count CSV
           </button>
         </div>
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>5) Participants and Meeting Documents</h3>
+        <h3 className="mb-2.5">5) Import Accounting Status (SUBMIT/APPROVED/REJECT)</h3>
+        <div className="field">
+          <label>Upload accounting file (.csv)</label>
+          <input type="file" accept=".csv,.txt" onChange={onImportAccountingFile} />
+        </div>
+        <div className="field mt-2.5">
+          <label>CSV: assetNo,accountingStatusCode</label>
+          <textarea value={accountingCsvText} onChange={(e) => setAccountingCsvText(e.target.value)} />
+        </div>
+        <div className="chip-list mt-3">
+          <button className="button button--ghost" type="button" onClick={onImportAccountingCsv}>
+            Import Accounting Status
+          </button>
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={() =>
+              downloadTextFile(
+                "stocktake-accounting-template.csv",
+                "100-001-2020,SUBMIT\n100-017-2019,APPROVED\n200-552-2017,REJECT",
+              )
+            }
+          >
+            Download Template
+          </button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h3 className="mb-2.5">6) Participants and Meeting Documents</h3>
         <div className="form-grid">
           <div className="field">
             <label>Participant Email</label>
@@ -326,7 +554,7 @@ export default function StocktakePageView() {
             <input value={meetingDocName} onChange={(e) => setMeetingDocName(e.target.value)} />
           </div>
         </div>
-        <div className="chip-list" style={{ marginTop: 12 }}>
+        <div className="chip-list mt-3">
           <button
             className="button button--ghost"
             type="button"
@@ -360,7 +588,7 @@ export default function StocktakePageView() {
             Add Meeting Doc
           </button>
         </div>
-        <div className="table-wrap" style={{ marginTop: 10 }}>
+        <div className="table-wrap mt-2.5">
           <table className="table">
             <thead>
               <tr>
@@ -399,7 +627,7 @@ export default function StocktakePageView() {
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>6) Summary and 3-tabs Status Report</h3>
+        <h3 className="mb-2.5">7) Summary and 3-tabs Status Report</h3>
         <div className="chip-list">
           {workspace.summary.map((row) => (
             <span className="chip" key={row.StatusCode}>
@@ -407,15 +635,22 @@ export default function StocktakePageView() {
             </span>
           ))}
         </div>
-        <div className="chip-list" style={{ marginTop: 10 }}>
+        <div className="chip-list mt-2.5">
+          {workspace.accountingSummary.map((row) => (
+            <span className="chip" key={row.StatusCode}>
+              Accounting {row.StatusCode}: {row.ItemCount}
+            </span>
+          ))}
+        </div>
+        <div className="chip-list mt-2.5">
           <span className="chip">Counted: {tabs.counted.length}</span>
           <span className="chip">Not Counted: {tabs.notCounted.length}</span>
-          <span className="chip">Rejected: {tabs.rejected.length}</span>
+          <span className="chip">Pending/Rejected: {tabs.rejected.length}</span>
         </div>
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>7) Count Records</h3>
+        <h3 className="mb-2.5">8) Count Records</h3>
         <div className="form-grid">
           <div className="field">
             <label>Search</label>
@@ -433,12 +668,13 @@ export default function StocktakePageView() {
             </select>
           </div>
         </div>
-        <div className="table-wrap" style={{ marginTop: 10 }}>
+        <div className="table-wrap mt-2.5">
           <table className="table">
             <thead>
               <tr>
                 <th>Asset</th>
                 <th>Status</th>
+                <th>Accounting</th>
                 <th>Method</th>
                 <th>Qty</th>
                 <th>Book Value</th>
@@ -452,14 +688,17 @@ export default function StocktakePageView() {
                 <tr key={row.StocktakeRecordId}>
                   <td>
                     {row.AssetNo} - {row.AssetName}
-                    <p className="muted">{row.CostCenterName} / {row.LocationName}</p>
+                    <p className="muted">
+                      {row.CostCenterName} / {row.LocationName}
+                    </p>
                   </td>
                   <td>
                     <StatusChip status={row.StatusCode} />
                   </td>
+                  <td>{row.AccountingStatusCode || "-"}</td>
                   <td>{row.CountMethod}</td>
                   <td>{row.CountedQty}</td>
-                  <td>{formatMoney(0)}</td>
+                  <td>{formatMoney(row.BookValue)}</td>
                   <td>{row.CountedByName}</td>
                   <td>{formatDate(row.CountedAt)}</td>
                   <td>{row.NoteText || "-"}</td>
@@ -467,7 +706,7 @@ export default function StocktakePageView() {
               ))}
               {!filteredRecords.length ? (
                 <tr>
-                  <td colSpan={8}>No records.</td>
+                  <td colSpan={9}>No records.</td>
                 </tr>
               ) : null}
             </tbody>

@@ -34,27 +34,27 @@ export default function AssetsListPageView() {
   return (
     <>
       <PageTitle
-        title="Asset Listings (Mock)"
-        subtitle="ครบฟังก์ชันเร่งด่วน: ทั้งหมด / ไม่มีรูป / SAP gap / ค้นหา / ดูรายละเอียด"
+        title="รายการทรัพย์สิน"
+        subtitle="ดูรายการทั้งหมด, ทรัพย์สินไม่มีรูป, ความต่างข้อมูล SAP และค้นหาได้ในหน้าเดียว"
         actions={
           <>
             <button
               className={`button ${tab === "all" ? "button--primary" : "button--ghost"}`}
               onClick={() => setTab("all")}
             >
-              All
+              ทั้งหมด
             </button>
             <button
               className={`button ${tab === "no-image" ? "button--primary" : "button--ghost"}`}
               onClick={() => setTab("no-image")}
             >
-              No Image
+              ไม่มีรูป
             </button>
             <button
               className={`button ${tab === "sap-gap" ? "button--primary" : "button--ghost"}`}
               onClick={() => setTab("sap-gap")}
             >
-              SAP Gap
+              ข้อมูล SAP ต่างกัน
             </button>
           </>
         }
@@ -63,19 +63,19 @@ export default function AssetsListPageView() {
       <section className="panel">
         <div className="kpi-grid">
           <div className="kpi">
-            <h3>Assets Total</h3>
+            <h3>จำนวนทรัพย์สินทั้งหมด</h3>
             <p>{metrics.total}</p>
           </div>
           <div className="kpi">
-            <h3>Assets Without Image</h3>
+            <h3>ทรัพย์สินไม่มีรูป</h3>
             <p>{metrics.noImage}</p>
           </div>
           <div className="kpi">
-            <h3>SAP Data Gap</h3>
+            <h3>ข้อมูล SAP ไม่ตรง</h3>
             <p>{metrics.sapGap}</p>
           </div>
           <div className="kpi">
-            <h3>Rows on Screen</h3>
+            <h3>จำนวนรายการที่แสดง</h3>
             <p>{rows.length}</p>
           </div>
         </div>
@@ -84,24 +84,24 @@ export default function AssetsListPageView() {
       <section className="panel">
         <div className="form-grid">
           <div className="field">
-            <label htmlFor="search">Search (AssetNo/Name/CostCenter/Location)</label>
+            <label htmlFor="search">ค้นหา (รหัส/ชื่อ/Cost Center/Location)</label>
             <input
               id="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="e.g. 100-001 or pump"
+              placeholder="เช่น 100-001 หรือ Pump"
             />
           </div>
           <div className="field">
-            <label>Current Mode</label>
+            <label>โหมดที่เลือก</label>
             <input value={tab} disabled />
           </div>
           <div className="field">
-            <label>SAP Mismatch in result</label>
+            <label>จำนวนที่ไม่ตรงกับ SAP</label>
             <input value={sapMismatchCount} disabled />
           </div>
           <div className="field">
-            <label>Reset mock data</label>
+            <label>รีเซ็ตข้อมูลตัวอย่าง</label>
             <button
               className="button button--ghost"
               type="button"
@@ -110,7 +110,7 @@ export default function AssetsListPageView() {
                 setTick((x) => x + 1);
               }}
             >
-              Reset Assets Mock
+              รีเซ็ตข้อมูลทรัพย์สิน
             </button>
           </div>
         </div>
@@ -122,13 +122,13 @@ export default function AssetsListPageView() {
             <thead>
               <tr>
                 <th>Asset No</th>
-                <th>Name</th>
+                <th>ชื่อทรัพย์สิน</th>
                 <th>Book Value</th>
-                <th>SAP Book Value</th>
-                <th>Status</th>
+                <th>Book Value (SAP)</th>
+                <th>สถานะ</th>
                 <th>Plant / CCA / Location</th>
-                <th>Image</th>
-                <th>Actions</th>
+                <th>รูปภาพ</th>
+                <th>การทำงาน</th>
               </tr>
             </thead>
             <tbody>
@@ -142,12 +142,12 @@ export default function AssetsListPageView() {
                       <p className="muted">{asset.AssetGroupName}</p>
                     </td>
                     <td>{formatMoney(asset.BookValue)}</td>
-                    <td>{asset.SapExists ? formatMoney(asset.SapBookValue) : "Not in SAP"}</td>
+                    <td>{asset.SapExists ? formatMoney(asset.SapBookValue) : "ไม่พบใน SAP"}</td>
                     <td>
                       <StatusChip status={asset.StatusName || "ACTIVE"} />
                       {gap ? (
-                        <p className="muted" style={{ marginTop: 4 }}>
-                          SAP mismatch
+                        <p className="muted mt-1">
+                          ข้อมูล SAP ไม่ตรง
                         </p>
                       ) : null}
                     </td>
@@ -157,10 +157,10 @@ export default function AssetsListPageView() {
                         {[asset.CostCenterName, asset.LocationName].filter(Boolean).join(" / ")}
                       </p>
                     </td>
-                    <td>{asset.HasImage ? "Yes" : "No"}</td>
+                    <td>{asset.HasImage ? "มี" : "ไม่มี"}</td>
                     <td>
                       <Link className="button button--ghost" href={`/assets/${asset.AssetId}`}>
-                        Detail
+                        รายละเอียด
                       </Link>
                     </td>
                   </tr>
@@ -168,7 +168,7 @@ export default function AssetsListPageView() {
               })}
               {!rows.length ? (
                 <tr>
-                  <td colSpan={8}>No assets found.</td>
+                  <td colSpan={8}>ไม่พบรายการทรัพย์สิน</td>
                 </tr>
               ) : null}
             </tbody>

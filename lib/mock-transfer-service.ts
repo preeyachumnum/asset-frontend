@@ -14,7 +14,11 @@ import { nowIso, readLocalState, uid, writeLocalState } from "@/lib/mock-utils";
 const KEY = "asset_frontend_mock_transfer_v1";
 
 function readRequests() {
-  return readLocalState<TransferRequestDetail[]>(KEY, []);
+  return readLocalState<TransferRequestDetail[]>(KEY, []).map((row) => ({
+    ...row,
+    ToOwnerName: row.ToOwnerName || "Unknown Receiver",
+    ToOwnerEmail: row.ToOwnerEmail || "asset.receiver@mitrphol.com",
+  }));
 }
 
 function saveRequests(rows: TransferRequestDetail[]) {
@@ -68,6 +72,10 @@ function addHistory(
 }
 
 function toSummary(request: TransferRequestDetail): TransferRequestSummary {
+  const currentApprover =
+    request.Status === "APPROVED"
+      ? "Waiting SAP Sync (00:00)"
+      : request.Approval?.CurrentStepName || request.Status;
   return {
     TransferRequestId: request.TransferRequestId,
     RequestNo: request.RequestNo,
@@ -78,11 +86,18 @@ function toSummary(request: TransferRequestDetail): TransferRequestSummary {
     ItemCount: request.Items.length,
     FromCostCenter: request.FromCostCenter,
     ToCostCenter: request.ToCostCenter,
+    ToOwnerName: request.ToOwnerName || "-",
+    ToOwnerEmail: request.ToOwnerEmail || "-",
+    CurrentApprover: currentApprover,
   };
 }
 
 export function listMockTransferRequests() {
   return readRequests().map(toSummary).sort((a, b) => (a.CreatedAt < b.CreatedAt ? 1 : -1));
+}
+
+export function listMockTransferDetails() {
+  return readRequests().sort((a, b) => (a.CreatedAt < b.CreatedAt ? 1 : -1));
 }
 
 export function getMockTransferDetail(requestId: string) {
@@ -95,6 +110,8 @@ export function createMockTransferDraft(input: {
   fromCostCenter: string;
   toCostCenter: string;
   toLocation: string;
+  toOwnerName: string;
+  toOwnerEmail: string;
   createdByName: string;
 }) {
   const rows = readRequests();
@@ -106,6 +123,8 @@ export function createMockTransferDraft(input: {
     FromCostCenter: input.fromCostCenter,
     ToCostCenter: input.toCostCenter,
     ToLocation: input.toLocation,
+    ToOwnerName: input.toOwnerName || "Unknown Receiver",
+    ToOwnerEmail: input.toOwnerEmail || "asset.receiver@mitrphol.com",
     CreatedByName: input.createdByName,
     CreatedAt: nowIso(),
     Status: "DRAFT",
@@ -188,7 +207,9 @@ export function actionMockTransferApproval(
         LocationName: request.ToLocation,
       });
     });
-    pushMockSyncQueue("TRANSFER", request.RequestNo);
+    pushMockSyncQueue("TRANSFER", request.RequestNo, {
+      notifyEmail: request.ToOwnerEmail || undefined,
+    });
   } else {
     request.Approval.CurrentStepOrder += 1;
     request.Approval.CurrentStepName =

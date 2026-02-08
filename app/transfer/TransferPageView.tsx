@@ -29,6 +29,8 @@ export default function TransferPageView() {
   const [fromCc, setFromCc] = useState("CCA-4100");
   const [toCc, setToCc] = useState("CCA-4200");
   const [toLocation, setToLocation] = useState("NEW-LOCATION");
+  const [toOwnerName, setToOwnerName] = useState("หัวหน้าแผนกรับโอน");
+  const [toOwnerEmail, setToOwnerEmail] = useState("asset.receiver@mitrphol.com");
   const [createdBy, setCreatedBy] = useState("asset.owner@mitrphol.com");
 
   const [assetId, setAssetId] = useState("");
@@ -49,7 +51,7 @@ export default function TransferPageView() {
       const byStatus = status === "ALL" || row.Status === status;
       const bySearch =
         !keyword ||
-        [row.RequestNo, row.CreatedByName, row.FromCostCenter, row.ToCostCenter]
+        [row.RequestNo, row.CreatedByName, row.FromCostCenter, row.ToCostCenter, row.ToOwnerName]
           .join(" ")
           .toLowerCase()
           .includes(keyword);
@@ -76,6 +78,8 @@ export default function TransferPageView() {
       fromCostCenter: fromCc,
       toCostCenter: toCc,
       toLocation: toLocation,
+      toOwnerName,
+      toOwnerEmail,
       createdByName: createdBy,
     });
     setSelectedId(request.TransferRequestId);
@@ -85,8 +89,8 @@ export default function TransferPageView() {
   return (
     <>
       <PageTitle
-        title="Transfer Management (Mock)"
-        subtitle="ครบ flow เร่งด่วน: create draft, add multi-item (same source CCA), submit, approve/reject"
+        title="การโอนย้ายทรัพย์สิน"
+        subtitle="สร้างคำขอ, เพิ่มหลายรายการจากต้นทางเดียวกัน, ส่งอนุมัติ, sync SAP และแจ้งอีเมลผู้รับโอน"
       />
 
       {message ? (
@@ -96,7 +100,7 @@ export default function TransferPageView() {
       ) : null}
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>1) Create Draft Request</h3>
+        <h3 className="mb-2.5">1) Create Draft Request</h3>
         <form onSubmit={onCreateDraft}>
           <div className="form-grid">
             <div className="field">
@@ -123,8 +127,16 @@ export default function TransferPageView() {
               <label>Created By</label>
               <input value={createdBy} onChange={(e) => setCreatedBy(e.target.value)} />
             </div>
+            <div className="field">
+              <label>Receiver Name</label>
+              <input value={toOwnerName} onChange={(e) => setToOwnerName(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Receiver Email</label>
+              <input value={toOwnerEmail} onChange={(e) => setToOwnerEmail(e.target.value)} />
+            </div>
           </div>
-          <div style={{ marginTop: 12 }}>
+          <div className="mt-3">
             <button className="button button--primary" type="submit">
               Create Draft
             </button>
@@ -133,7 +145,7 @@ export default function TransferPageView() {
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>2) Request List</h3>
+        <h3 className="mb-2.5">2) Request List</h3>
         <div className="form-grid">
           <div className="field">
             <label>Search</label>
@@ -150,7 +162,7 @@ export default function TransferPageView() {
             </select>
           </div>
         </div>
-        <div className="table-wrap" style={{ marginTop: 10 }}>
+        <div className="table-wrap mt-2.5">
           <table className="table">
             <thead>
               <tr>
@@ -159,6 +171,7 @@ export default function TransferPageView() {
                 <th>From → To</th>
                 <th>Total BV</th>
                 <th>Items</th>
+                <th>Receiver</th>
                 <th>Created</th>
                 <th>Select</th>
               </tr>
@@ -175,6 +188,7 @@ export default function TransferPageView() {
                   </td>
                   <td>{formatMoney(row.TotalBookValue)}</td>
                   <td>{row.ItemCount}</td>
+                  <td>{row.ToOwnerName}</td>
                   <td>{formatDate(row.CreatedAt)}</td>
                   <td>
                     <button className="button button--ghost" type="button" onClick={() => setSelectedId(row.TransferRequestId)}>
@@ -185,7 +199,7 @@ export default function TransferPageView() {
               ))}
               {!filtered.length ? (
                 <tr>
-                  <td colSpan={7}>No requests.</td>
+                  <td colSpan={8}>No requests.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -195,13 +209,14 @@ export default function TransferPageView() {
 
       {selected ? (
         <section className="panel">
-          <h3 style={{ marginBottom: 10 }}>
+          <h3 className="mb-2.5">
             3) Request Detail: {selected.RequestNo} ({truncateId(selected.TransferRequestId)})
           </h3>
-          <div className="chip-list" style={{ marginBottom: 10 }}>
+          <div className="chip-list mb-2.5">
             <span className="chip">Status: {selected.Status}</span>
             <span className="chip">From: {selected.FromCostCenter}</span>
             <span className="chip">To: {selected.ToCostCenter}</span>
+            <span className="chip">Receiver: {selected.ToOwnerName}</span>
             <span className="chip">Total BV: {formatMoney(selected.TotalBookValue)}</span>
           </div>
 
@@ -227,7 +242,7 @@ export default function TransferPageView() {
             </div>
           </div>
 
-          <div className="chip-list" style={{ marginTop: 12 }}>
+          <div className="chip-list mt-3">
             <button
               className="button button--ghost"
               type="button"
@@ -287,7 +302,7 @@ export default function TransferPageView() {
             </button>
           </div>
 
-          <div className="table-wrap" style={{ marginTop: 10 }}>
+          <div className="table-wrap mt-2.5">
             <table className="table">
               <thead>
                 <tr>
@@ -313,7 +328,7 @@ export default function TransferPageView() {
             </table>
           </div>
 
-          <div className="table-wrap" style={{ marginTop: 10 }}>
+          <div className="table-wrap mt-2.5">
             <table className="table">
               <thead>
                 <tr>

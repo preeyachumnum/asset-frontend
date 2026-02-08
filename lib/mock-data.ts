@@ -143,6 +143,8 @@ export const mockTransferRequests: TransferRequestSummary[] = [
     ItemCount: 4,
     FromCostCenter: "CCA-4100",
     ToCostCenter: "CCA-4200",
+    ToOwnerName: "หัวหน้าแผนกรับโอน",
+    ToOwnerEmail: "asset.receiver@mitrphol.com",
   },
   {
     TransferRequestId: "41f2b750-97cb-49fb-a631-c91fff53f891",
@@ -154,6 +156,8 @@ export const mockTransferRequests: TransferRequestSummary[] = [
     ItemCount: 6,
     FromCostCenter: "CCA-6200",
     ToCostCenter: "CCA-1000",
+    ToOwnerName: "ผู้จัดการฝ่ายรับโอน",
+    ToOwnerEmail: "asset.owner.hq@mitrphol.com",
   },
 ];
 

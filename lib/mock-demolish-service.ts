@@ -105,6 +105,10 @@ export function listMockDemolishRequests() {
   return readRequests().map(toSummary).sort((a, b) => (a.CreatedAt < b.CreatedAt ? 1 : -1));
 }
 
+export function listMockDemolishDetails() {
+  return readRequests().sort((a, b) => (a.CreatedAt < b.CreatedAt ? 1 : -1));
+}
+
 export function getMockDemolishDetail(requestId: string) {
   return readRequests().find((x) => x.DemolishRequestId === requestId) || null;
 }
@@ -221,7 +225,6 @@ export function actionMockDemolishApproval(
   if (request.Approval.CurrentStepOrder >= request.Approval.Steps.length) {
     request.Status = "APPROVED";
     request.Approval.CurrentStepName = "Approved";
-    pushMockSyncQueue("DEMOLISH", request.RequestNo);
   } else {
     request.Approval.CurrentStepOrder += 1;
     request.Approval.CurrentStepName =
@@ -242,6 +245,7 @@ export function receiveMockDemolish(requestId: string, actorName: string) {
   request.ReceivedAt = nowIso();
   request.ReceivedBy = actorName;
   addHistory(request, "COMMENT", actorName, "Supplies received");
+  pushMockSyncQueue("DEMOLISH", request.RequestNo);
   saveRequests(rows);
 }
 

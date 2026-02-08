@@ -108,6 +108,9 @@ export interface TransferRequestSummary {
   ItemCount: number;
   FromCostCenter: string;
   ToCostCenter: string;
+  ToOwnerName: string;
+  ToOwnerEmail: string;
+  CurrentApprover?: string;
 }
 
 export interface StocktakeSummaryRow {
@@ -134,9 +137,23 @@ export interface SapSyncQueueRow {
   SapSyncOutboxId: string;
   RefType: "DEMOLISH" | "TRANSFER";
   RefNo: string;
+  NotifyEmail?: string;
   Status: "PENDING" | "PROCESSING" | "SUCCESS" | "FAIL";
   CreatedAt: string;
   ProcessedAt?: string;
+  ErrorMessage?: string;
+}
+
+export interface EmailOutboxRow {
+  EmailOutboxId: string;
+  RefType: "TRANSFER";
+  RefNo: string;
+  ToEmail: string;
+  Subject: string;
+  BodyText: string;
+  Status: "PENDING" | "SENT" | "FAIL";
+  CreatedAt: string;
+  SentAt?: string;
   ErrorMessage?: string;
 }
 
@@ -233,6 +250,8 @@ export interface TransferRequestDetail {
   FromCostCenter: string;
   ToCostCenter: string;
   ToLocation: string;
+  ToOwnerName: string;
+  ToOwnerEmail: string;
   CreatedByName: string;
   CreatedAt: string;
   Status: RequestStatus;
@@ -275,11 +294,14 @@ export interface StocktakeRecordView {
   AssetId: string;
   AssetNo: string;
   AssetName: string;
+  BookValue: number;
   CostCenterName: string;
   AssetGroupName: string;
   LocationName: string;
   StatusCode: "COUNTED" | "NOT_COUNTED" | "PENDING" | "REJECTED" | "OTHER";
   StatusName: string;
+  AccountingStatusCode?: StocktakeAccountingStatusCode;
+  AccountingStatusName?: string;
   CountMethod: "QR" | "MANUAL" | "EXCEL";
   CountedQty: number;
   CountedAt: string;
@@ -287,6 +309,8 @@ export interface StocktakeRecordView {
   NoteText?: string;
   Images: string[];
 }
+
+export type StocktakeAccountingStatusCode = "SUBMIT" | "APPROVED" | "REJECT";
 
 export interface StocktakeReportFilters {
   PlantId: string;

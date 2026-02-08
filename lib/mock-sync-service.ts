@@ -19,12 +19,17 @@ export function listMockSyncQueue() {
   return readSync().sort((a, b) => (a.CreatedAt < b.CreatedAt ? 1 : -1));
 }
 
-export function pushMockSyncQueue(refType: "DEMOLISH" | "TRANSFER", refNo: string) {
+export function pushMockSyncQueue(
+  refType: "DEMOLISH" | "TRANSFER",
+  refNo: string,
+  options?: { notifyEmail?: string },
+) {
   const rows = readSync();
   rows.unshift({
     SapSyncOutboxId: uid(),
     RefType: refType,
     RefNo: refNo,
+    NotifyEmail: options?.notifyEmail,
     Status: "PENDING",
     CreatedAt: nowIso(),
   });
@@ -38,9 +43,10 @@ export function markMockSyncResult(
 ) {
   const rows = readSync();
   const row = rows.find((x) => x.SapSyncOutboxId === sapSyncOutboxId);
-  if (!row) return;
+  if (!row) return null;
   row.Status = status;
   row.ProcessedAt = nowIso();
   row.ErrorMessage = errorMessage;
   saveSync(rows);
+  return row;
 }

@@ -1,27 +1,41 @@
-import { listMockDemolishRequests } from "@/lib/mock-demolish-service";
-import { listMockTransferRequests } from "@/lib/mock-transfer-service";
+import { listMockDemolishDetails } from "@/lib/mock-demolish-service";
+import { listMockTransferDetails } from "@/lib/mock-transfer-service";
+
+function toApproverTrail(steps: string[]) {
+  if (!steps.length) return "-";
+  return steps.join(" > ");
+}
 
 export function getMockManagementTrackingRows() {
-  const demolish = listMockDemolishRequests().map((x) => ({
+  const demolish = listMockDemolishDetails().map((x) => ({
     Type: "DEMOLISH",
     RequestNo: x.RequestNo,
     Status: x.Status,
-    CurrentApprover: x.CurrentApprover || "-",
+    CurrentApprover:
+      x.Status === "RECEIVED"
+        ? "Supplies received"
+        : x.Status === "APPROVED"
+          ? "Waiting for supplies receive"
+          : x.Approval?.CurrentStepName || "-",
     CreatedAt: x.CreatedAt,
     TotalBookValue: x.TotalBookValue,
-    ItemCount: x.ItemCount,
+    ItemCount: x.Items.length,
     CreatedByName: x.CreatedByName,
+    Receiver: x.ReceivedBy || "-",
+    ApproverTrail: toApproverTrail(x.ApprovalHistory.map((a) => `${a.StepName}:${a.ActionCode}`)),
   }));
 
-  const transfer = listMockTransferRequests().map((x) => ({
+  const transfer = listMockTransferDetails().map((x) => ({
     Type: "TRANSFER",
     RequestNo: x.RequestNo,
     Status: x.Status,
-    CurrentApprover: x.Status,
+    CurrentApprover: x.Approval?.CurrentStepName || x.Status,
     CreatedAt: x.CreatedAt,
     TotalBookValue: x.TotalBookValue,
-    ItemCount: x.ItemCount,
+    ItemCount: x.Items.length,
     CreatedByName: x.CreatedByName,
+    Receiver: `${x.ToOwnerName} (${x.ToOwnerEmail})`,
+    ApproverTrail: toApproverTrail(x.ApprovalHistory.map((a) => `${a.StepName}:${a.ActionCode}`)),
   }));
 
   return [...demolish, ...transfer].sort((a, b) => (a.CreatedAt < b.CreatedAt ? 1 : -1));

@@ -73,24 +73,10 @@ export default function LoginPage() {
     }
   }
 
-  function useDemo() {
-    saveSession({
-      sessionId: "demo-session",
-      expiresAt: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
-      user: {
-        userId: "demo-user",
-        email: "demo@mitrphol.com",
-        displayName: "Demo User",
-      },
-      selectedPlantId: "demo-plant",
-    });
-    router.push("/");
-  }
-
   return (
     <div className="panel login-card">
       <PageTitle
-        title="Authentication"
+        title="เข้าสู่ระบบ"
         subtitle="ใช้บัญชี @mitrphol.com และเลือกโรงงานตามสิทธิ์จาก UserPlantAccess"
       />
 
@@ -107,7 +93,7 @@ export default function LoginPage() {
           />
         </div>
 
-        <div className="field" style={{ marginTop: 10 }}>
+        <div className="field mt-2.5">
           <label htmlFor="password">Password</label>
           <input
             id="password"
@@ -117,15 +103,15 @@ export default function LoginPage() {
           />
         </div>
 
-        <div className="field" style={{ marginTop: 10 }}>
-          <label htmlFor="plant">Plant (optional)</label>
+        <div className="field mt-2.5">
+          <label htmlFor="plant">โรงงาน (ไม่บังคับ)</label>
           <select
             id="plant"
             value={plantId}
             onChange={(event) => setPlantId(event.target.value)}
             disabled={!plants.length}
           >
-            {!plants.length ? <option value="">Auto select first plant</option> : null}
+            {!plants.length ? <option value="">เลือกระบบกำหนดโรงงานอัตโนมัติ</option> : null}
             {plants.map((plant) => (
               <option key={plant.PlantId} value={plant.PlantId}>
                 {plant.PlantCode || plant.PlantName || plant.PlantId}
@@ -135,14 +121,14 @@ export default function LoginPage() {
         </div>
 
         {message ? (
-          <p className="muted" style={{ marginTop: 10 }}>
+          <p className="muted mt-2.5">
             {message}
           </p>
         ) : null}
 
         <div className="login-actions">
           <button className="button button--primary" disabled={submitting} type="submit">
-            {submitting ? "กำลังเข้าสู่ระบบ..." : "Sign in"}
+            {submitting ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
           </button>
           <button
             className="button button--ghost"
@@ -151,9 +137,6 @@ export default function LoginPage() {
             onClick={loadPlants}
           >
             {loadingPlant ? "กำลังโหลด..." : "โหลดสิทธิ์โรงงาน"}
-          </button>
-          <button className="button button--ghost" type="button" onClick={useDemo}>
-            เข้าแบบ Demo
           </button>
         </div>
       </form>

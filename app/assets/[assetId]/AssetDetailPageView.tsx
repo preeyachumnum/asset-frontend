@@ -39,7 +39,7 @@ export default function AssetDetailPageView() {
       AssetGroupName: String(formData.get("groupName") || ""),
     });
     setTick((x) => x + 1);
-    setMessage("Saved asset fields.");
+    setMessage("บันทึกข้อมูลทรัพย์สินเรียบร้อยแล้ว");
   }
 
   function onUploadFiles(event: React.ChangeEvent<HTMLInputElement>) {
@@ -50,17 +50,17 @@ export default function AssetDetailPageView() {
       Array.from(files).map((file) => file.name),
     );
     setTick((x) => x + 1);
-    setMessage(`Uploaded ${files.length} image(s).`);
+    setMessage(`อัปโหลดรูปภาพ ${files.length} รายการเรียบร้อยแล้ว`);
   }
 
   return (
     <>
       <PageTitle
-        title="Asset Detail (Mock)"
-        subtitle="แก้สถานะ/CCA/Location/Group และเพิ่มรูปภาพได้"
+        title="รายละเอียดทรัพย์สิน"
+        subtitle="แก้ไขสถานะ, Cost Center, Location, กลุ่มทรัพย์สิน และอัปโหลดรูปภาพได้"
         actions={
           <Link href="/assets" className="button button--ghost">
-            Back to Assets
+            กลับไปรายการทรัพย์สิน
           </Link>
         }
       />
@@ -108,13 +108,13 @@ export default function AssetDetailPageView() {
             </div>
           </div>
         ) : (
-          <p>Asset not found.</p>
+          <p>ไม่พบทรัพย์สิน</p>
         )}
       </section>
 
       {asset ? (
         <section className="panel">
-          <h3 style={{ marginBottom: 10 }}>Update Asset Fields</h3>
+          <h3 className="mb-2.5">แก้ไขข้อมูลทรัพย์สิน</h3>
           <form key={`${asset.AssetId}-${tick}`} onSubmit={onSaveBasic}>
             <div className="form-grid">
               <div className="field">
@@ -140,9 +140,9 @@ export default function AssetDetailPageView() {
                 <input name="groupName" defaultValue={asset.AssetGroupName || ""} />
               </div>
             </div>
-            <div style={{ marginTop: 12 }}>
+            <div className="mt-3">
               <button className="button button--primary" type="submit">
-                Save Changes
+                บันทึกการเปลี่ยนแปลง
               </button>
             </div>
           </form>
@@ -151,38 +151,29 @@ export default function AssetDetailPageView() {
 
       {asset ? (
         <section className="panel">
-          <h3 style={{ marginBottom: 10 }}>Asset Images</h3>
-          <div className="field" style={{ marginBottom: 12 }}>
-            <label htmlFor="asset-images">Upload images (mock)</label>
+          <h3 className="mb-2.5">รูปภาพทรัพย์สิน</h3>
+          <div className="field mb-3">
+            <label htmlFor="asset-images">อัปโหลดรูปภาพ</label>
             <input id="asset-images" type="file" multiple accept="image/*" onChange={onUploadFiles} />
           </div>
           {images.length ? (
-            <div
-              style={{
-                display: "grid",
-                gap: 10,
-                gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-              }}
-            >
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-2.5">
               {images.map((image, index) => (
                 <article key={image.AssetImageId || `${image.FileUrl}-${index}`} className="panel">
                   <div
+                    className="h-40 w-full rounded-xl border border-[#dce7f3] bg-center bg-cover bg-no-repeat"
                     style={{
-                      width: "100%",
-                      height: 160,
-                      borderRadius: 12,
-                      border: "1px solid #dce7f3",
-                      background: `url('${image.FileUrl}') center/cover no-repeat`,
+                      backgroundImage: `url('${image.FileUrl}')`,
                     }}
                   />
-                  <p className="muted" style={{ marginTop: 8 }}>
-                    {image.IsPrimary ? "Primary" : "Secondary"} | {formatDate(image.UploadedAt)}
+                  <p className="muted mt-2">
+                    {image.IsPrimary ? "รูปหลัก" : "รูปรอง"} | {formatDate(image.UploadedAt)}
                   </p>
                 </article>
               ))}
             </div>
           ) : (
-            <p className="muted">No images yet.</p>
+            <p className="muted">ยังไม่มีรูปภาพ</p>
           )}
         </section>
       ) : null}

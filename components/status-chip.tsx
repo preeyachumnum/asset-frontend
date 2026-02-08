@@ -4,13 +4,13 @@ type StatusChipProps = {
 
 function resolveClass(status: string) {
   const normalized = status.toUpperCase();
-  if (["APPROVED", "RECEIVED", "SUCCESS", "COUNTED", "SYNCED"].includes(normalized)) {
+  if (["APPROVED", "RECEIVED", "SUCCESS", "SENT", "COUNTED", "SYNCED"].includes(normalized)) {
     return "status-chip status-chip--positive";
   }
-  if (["REJECTED", "FAIL", "NOT_COUNTED"].includes(normalized)) {
+  if (["REJECTED", "FAIL", "NOT_COUNTED", "REJECT"].includes(normalized)) {
     return "status-chip status-chip--negative";
   }
-  if (["PENDING", "SUBMITTED", "SYNC_PENDING", "PROCESSING"].includes(normalized)) {
+  if (["PENDING", "SUBMITTED", "SUBMIT", "SYNC_PENDING", "PROCESSING"].includes(normalized)) {
     return "status-chip status-chip--warning";
   }
   if (normalized === "DRAFT") {

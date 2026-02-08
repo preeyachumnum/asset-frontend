@@ -66,18 +66,18 @@ export default function ReportsPageView() {
     () => getMockStocktakeThreeTabs(plantId, stocktakeYear),
     [plantId, stocktakeYear],
   );
-  const managementRows = useMemo(() => getMockManagementTrackingRows(), []);
+  const managementRows = getMockManagementTrackingRows();
 
   const totalBookValue = useMemo(
-    () => report.details.reduce((sum, row) => sum + Number(row.CountedQty || 0), 0),
+    () => report.details.reduce((sum, row) => sum + Number(row.BookValue || 0), 0),
     [report.details],
   );
 
   return (
     <>
       <PageTitle
-        title="Reports Menu (Mock)"
-        subtitle="ครบเมนูเร่งด่วน: summary/detail, 3 tabs export, compare year, management tracking"
+        title="รายงาน"
+        subtitle="สรุปผลตรวจนับ, รายละเอียด, เปรียบเทียบรายปี และติดตามสถานะงาน"
       />
 
       <section className="panel">
@@ -136,7 +136,7 @@ export default function ReportsPageView() {
             <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           </div>
         </div>
-        <div className="chip-list" style={{ marginTop: 12 }}>
+        <div className="chip-list mt-3">
           <button
             className="button button--ghost"
             type="button"
@@ -147,7 +147,9 @@ export default function ReportsPageView() {
                   report.details.map((row) => ({
                     AssetNo: row.AssetNo,
                     AssetName: row.AssetName,
+                    BookValue: row.BookValue,
                     StatusCode: row.StatusCode,
+                    AccountingStatus: row.AccountingStatusCode || "",
                     CountMethod: row.CountMethod,
                     CountedQty: row.CountedQty,
                     CountedBy: row.CountedByName,
@@ -165,16 +167,63 @@ export default function ReportsPageView() {
             type="button"
             onClick={() =>
               downloadCsv(
-                `stocktake-3tabs-${stocktakeYear}.csv`,
-                rowsToCsv([
-                  { Tab: "COUNTED", Count: tabs.counted.length },
-                  { Tab: "NOT_COUNTED", Count: tabs.notCounted.length },
-                  { Tab: "REJECTED", Count: tabs.rejected.length },
-                ]),
+                `stocktake-tab-counted-${stocktakeYear}.csv`,
+                rowsToCsv(
+                  tabs.counted.map((row) => ({
+                    AssetNo: row.AssetNo,
+                    AssetName: row.AssetName,
+                    CostCenter: row.CostCenterName,
+                    StatusCode: row.StatusCode,
+                    CountedBy: row.CountedByName,
+                    CountedAt: row.CountedAt || "",
+                  })),
+                ),
               )
             }
           >
-            Export 3 Tabs CSV
+            Export Tab: Counted
+          </button>
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={() =>
+              downloadCsv(
+                `stocktake-tab-not-counted-${stocktakeYear}.csv`,
+                rowsToCsv(
+                  tabs.notCounted.map((row) => ({
+                    AssetNo: row.AssetNo,
+                    AssetName: row.AssetName,
+                    CostCenter: row.CostCenterName,
+                    StatusCode: row.StatusCode,
+                    CountedBy: row.CountedByName,
+                    CountedAt: row.CountedAt || "",
+                  })),
+                ),
+              )
+            }
+          >
+            Export Tab: Not Counted
+          </button>
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={() =>
+              downloadCsv(
+                `stocktake-tab-pending-${stocktakeYear}.csv`,
+                rowsToCsv(
+                  tabs.rejected.map((row) => ({
+                    AssetNo: row.AssetNo,
+                    AssetName: row.AssetName,
+                    CostCenter: row.CostCenterName,
+                    StatusCode: row.StatusCode,
+                    CountedBy: row.CountedByName,
+                    CountedAt: row.CountedAt || "",
+                  })),
+                ),
+              )
+            }
+          >
+            Export Tab: Pending/Rejected
           </button>
         </div>
       </section>
@@ -194,14 +243,14 @@ export default function ReportsPageView() {
             <p>{report.previousYear}</p>
           </div>
           <div className="kpi">
-            <h3>Count Qty Total</h3>
-            <p>{totalBookValue}</p>
+            <h3>Book Value Total</h3>
+            <p>{formatMoney(totalBookValue)}</p>
           </div>
         </div>
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>Stocktake Summary</h3>
+        <h3 className="mb-2.5">Stocktake Summary</h3>
         <div className="chip-list">
           {report.summary.map((row) => (
             <span className="chip" key={row.StatusCode}>
@@ -212,7 +261,7 @@ export default function ReportsPageView() {
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>Stocktake Detail</h3>
+        <h3 className="mb-2.5">Stocktake Detail</h3>
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -221,6 +270,7 @@ export default function ReportsPageView() {
                 <th>Status</th>
                 <th>Method</th>
                 <th>Qty</th>
+                <th>Book Value</th>
                 <th>Counted By</th>
                 <th>Counted At</th>
                 <th>CostCenter/Location</th>
@@ -239,6 +289,7 @@ export default function ReportsPageView() {
                   </td>
                   <td>{row.CountMethod}</td>
                   <td>{row.CountedQty}</td>
+                  <td>{formatMoney(row.BookValue)}</td>
                   <td>{row.CountedByName}</td>
                   <td>{formatDate(row.CountedAt)}</td>
                   <td>
@@ -249,7 +300,7 @@ export default function ReportsPageView() {
               ))}
               {!report.details.length ? (
                 <tr>
-                  <td colSpan={8}>No report rows.</td>
+                  <td colSpan={9}>No report rows.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -258,7 +309,7 @@ export default function ReportsPageView() {
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>
+        <h3 className="mb-2.5">
           Compare Year ({stocktakeYear} vs {report.previousYear})
         </h3>
         <div className="table-wrap">
@@ -295,7 +346,7 @@ export default function ReportsPageView() {
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>Management Tracking (Demolish/Transfer)</h3>
+        <h3 className="mb-2.5">Management Tracking (Demolish/Transfer)</h3>
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -306,6 +357,8 @@ export default function ReportsPageView() {
                 <th>Current Approver</th>
                 <th>Book Value</th>
                 <th>Items</th>
+                <th>Receiver</th>
+                <th>Approval Trail</th>
                 <th>Created By</th>
                 <th>Created At</th>
               </tr>
@@ -321,13 +374,15 @@ export default function ReportsPageView() {
                   <td>{row.CurrentApprover}</td>
                   <td>{formatMoney(row.TotalBookValue)}</td>
                   <td>{row.ItemCount}</td>
+                  <td>{row.Receiver}</td>
+                  <td>{row.ApproverTrail}</td>
                   <td>{row.CreatedByName}</td>
                   <td>{formatDate(row.CreatedAt)}</td>
                 </tr>
               ))}
               {!managementRows.length ? (
                 <tr>
-                  <td colSpan={8}>No management tracking rows.</td>
+                  <td colSpan={10}>No management tracking rows.</td>
                 </tr>
               ) : null}
             </tbody>

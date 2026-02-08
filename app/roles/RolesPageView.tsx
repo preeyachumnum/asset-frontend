@@ -14,21 +14,15 @@ export default function RolesPage() {
       />
 
       <section className="panel">
-        <div
-          style={{
-            display: "grid",
-            gap: 12,
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          }}
-        >
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
           {roleDefinitions.map((role) => (
-            <article key={role.code} className="panel" style={{ marginTop: 0 }}>
+            <article key={role.code} className="panel !mt-0">
               <h3>{role.name}</h3>
-              <p className="muted" style={{ marginTop: 4 }}>
+              <p className="muted mt-1">
                 {role.code}
               </p>
-              <p style={{ marginTop: 8 }}>{role.description}</p>
-              <div className="chip-list" style={{ marginTop: 8 }}>
+              <p className="mt-2">{role.description}</p>
+              <div className="chip-list mt-2">
                 {role.permissions.map((permission) => (
                   <span className="chip" key={permission}>
                     {permission}
@@ -41,7 +35,7 @@ export default function RolesPage() {
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>Permission Matrix</h3>
+        <h3 className="mb-2.5">Permission Matrix</h3>
         <div className="table-wrap">
           <table className="table">
             <thead>

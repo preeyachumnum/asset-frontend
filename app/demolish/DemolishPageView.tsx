@@ -81,8 +81,8 @@ export default function DemolishPageView() {
   return (
     <>
       <PageTitle
-        title="Demolish Management (Mock)"
-        subtitle="ครบ flow เร่งด่วน: create draft, add multi-item, attach docs, submit approval, approve/reject, receive"
+        title="การตัดบัญชีทรัพย์สิน"
+        subtitle="สร้างคำขอ, แนบรายการและเอกสาร, ส่งอนุมัติ, อนุมัติ/ไม่อนุมัติ, รับเข้าพัสดุ แล้วค่อยเข้า SAP Sync"
       />
 
       {message ? (
@@ -92,7 +92,7 @@ export default function DemolishPageView() {
       ) : null}
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>1) Create Draft Request</h3>
+        <h3 className="mb-2.5">1) Create Draft Request</h3>
         <form onSubmit={onCreateDraft}>
           <div className="form-grid">
             <div className="field">
@@ -108,7 +108,7 @@ export default function DemolishPageView() {
               <input value={createdBy} onChange={(e) => setCreatedBy(e.target.value)} />
             </div>
           </div>
-          <div style={{ marginTop: 12 }}>
+          <div className="mt-3">
             <button className="button button--primary" type="submit">
               Create Draft
             </button>
@@ -117,7 +117,7 @@ export default function DemolishPageView() {
       </section>
 
       <section className="panel">
-        <h3 style={{ marginBottom: 10 }}>2) Request List</h3>
+        <h3 className="mb-2.5">2) Request List</h3>
         <div className="form-grid">
           <div className="field">
             <label>Search</label>
@@ -134,7 +134,7 @@ export default function DemolishPageView() {
             </select>
           </div>
         </div>
-        <div className="table-wrap" style={{ marginTop: 10 }}>
+        <div className="table-wrap mt-2.5">
           <table className="table">
             <thead>
               <tr>
@@ -181,10 +181,10 @@ export default function DemolishPageView() {
 
       {selected ? (
         <section className="panel">
-          <h3 style={{ marginBottom: 10 }}>
+          <h3 className="mb-2.5">
             3) Request Detail: {selected.RequestNo} ({truncateId(selected.DemolishRequestId)})
           </h3>
-          <div className="chip-list" style={{ marginBottom: 10 }}>
+          <div className="chip-list mb-2.5">
             <span className="chip">Status: {selected.Status}</span>
             <span className="chip">Total BV: {formatMoney(selected.TotalBookValue)}</span>
             <span className="chip">Items: {selected.Items.length}</span>
@@ -221,7 +221,7 @@ export default function DemolishPageView() {
             </div>
           </div>
 
-          <div className="chip-list" style={{ marginTop: 12 }}>
+          <div className="chip-list mt-3">
             <button
               className="button button--ghost"
               type="button"
@@ -322,7 +322,7 @@ export default function DemolishPageView() {
             </button>
           </div>
 
-          <div className="form-grid" style={{ marginTop: 12 }}>
+          <div className="form-grid mt-3">
             <div className="field">
               <label>Approval Actor</label>
               <input value={approvalActor} onChange={(e) => setApprovalActor(e.target.value)} />
@@ -333,7 +333,7 @@ export default function DemolishPageView() {
             </div>
           </div>
 
-          <div className="table-wrap" style={{ marginTop: 10 }}>
+          <div className="table-wrap mt-2.5">
             <table className="table">
               <thead>
                 <tr>
@@ -361,7 +361,7 @@ export default function DemolishPageView() {
             </table>
           </div>
 
-          <div className="table-wrap" style={{ marginTop: 10 }}>
+          <div className="table-wrap mt-2.5">
             <table className="table">
               <thead>
                 <tr>
@@ -387,7 +387,7 @@ export default function DemolishPageView() {
             </table>
           </div>
 
-          <div className="table-wrap" style={{ marginTop: 10 }}>
+          <div className="table-wrap mt-2.5">
             <table className="table">
               <thead>
                 <tr>

@@ -1,6 +1,7 @@
 import { getMockAssetOptions } from "@/lib/mock-assets-service";
 import { stocktakeStatuses } from "@/lib/mock-data";
 import type {
+  StocktakeAccountingStatusCode,
   StocktakeMeetingDocView,
   StocktakeParticipantView,
   StocktakeRecordView,
@@ -25,6 +26,12 @@ const statusLabelMap: Record<string, string> = {
   PENDING: "Pending",
   REJECTED: "Rejected",
   OTHER: "Other",
+};
+
+const accountingStatusLabelMap: Record<StocktakeAccountingStatusCode, string> = {
+  SUBMIT: "Submitted by Accounting",
+  APPROVED: "Approved by Accounting",
+  REJECT: "Rejected by Accounting",
 };
 
 function seedStore(): StocktakeStore {
@@ -58,6 +65,7 @@ function seedStore(): StocktakeStore {
         AssetId: asset.AssetId,
         AssetNo: asset.AssetNo,
         AssetName: asset.AssetName,
+        BookValue: asset.BookValue,
         CostCenterName: asset.CostCenterName || "CCA-UNDEFINED",
         AssetGroupName: "General",
         LocationName: "MAIN",
@@ -75,7 +83,13 @@ function seedStore(): StocktakeStore {
 }
 
 function readStore() {
-  return readLocalState<StocktakeStore>(KEY, seedStore());
+  const store = readLocalState<StocktakeStore>(KEY, seedStore());
+  const assetMap = new Map(getMockAssetOptions().map((x) => [x.AssetNo, x]));
+  store.records = store.records.map((row) => ({
+    ...row,
+    BookValue: row.BookValue ?? assetMap.get(row.AssetNo)?.BookValue ?? 0,
+  }));
+  return store;
 }
 
 function saveStore(store: StocktakeStore) {
@@ -106,6 +120,9 @@ export function closeMockStocktakeYear(plantId: string, stocktakeYear: number, c
   const store = readStore();
   const config = getYearConfig(store, plantId, stocktakeYear);
   if (!config) throw new Error("Year config not found");
+  if (!config.ReportGeneratedAt) {
+    throw new Error("Please mark report generated before closing year");
+  }
   config.IsOpen = false;
   config.ClosedAt = nowIso();
   config.ClosedBy = closedBy;
@@ -128,7 +145,26 @@ export function carryPendingToNextMockYear(
   actorName: string,
 ) {
   const store = readStore();
-  getOrCreateMockStocktakeYearConfig(plantId, toYear);
+  const fromConfig = getYearConfig(store, plantId, fromYear);
+  if (!fromConfig) throw new Error("From-year config not found");
+  if (fromConfig.IsOpen) throw new Error("Please close current year before opening next year");
+  if (!fromConfig.ReportGeneratedAt) {
+    throw new Error("Please generate previous-year report before opening next year");
+  }
+
+  let toConfig = getYearConfig(store, plantId, toYear);
+  if (!toConfig) {
+    toConfig = {
+      StocktakeYearConfigId: uid(),
+      PlantId: plantId,
+      StocktakeYear: toYear,
+      IsOpen: true,
+    };
+    store.yearConfigs.push(toConfig);
+  } else {
+    toConfig.IsOpen = true;
+  }
+
   const pendingRows = store.records.filter(
     (x) => x.PlantId === plantId && x.StocktakeYear === fromYear && x.StatusCode === "PENDING",
   );
@@ -189,6 +225,7 @@ export function upsertMockStocktakeRecord(input: {
       AssetId: assetId,
       AssetNo: input.assetNo,
       AssetName: assetName,
+      BookValue: asset?.BookValue || 0,
       CostCenterName: costCenter,
       AssetGroupName: "General",
       LocationName: "MAIN",
@@ -203,6 +240,9 @@ export function upsertMockStocktakeRecord(input: {
     };
     store.records.push(row);
   } else {
+    row.AssetName = assetName;
+    row.BookValue = asset?.BookValue || row.BookValue;
+    row.CostCenterName = costCenter;
     row.StatusCode = input.statusCode;
     row.StatusName = statusLabelMap[input.statusCode];
     row.CountMethod = input.countMethod;
@@ -216,6 +256,15 @@ export function upsertMockStocktakeRecord(input: {
   }
   saveStore(store);
   return row;
+}
+
+export function listMockStocktakeAssetByCostCenter(
+  plantId: string,
+  stocktakeYear: number,
+  costCenterName: string,
+) {
+  getOrCreateMockStocktakeYearConfig(plantId, stocktakeYear);
+  return getMockAssetOptions().filter((x) => x.CostCenterName === costCenterName);
 }
 
 export function importMockStocktakeCsv(input: {
@@ -260,6 +309,49 @@ export function importMockStocktakeCsv(input: {
     }
   });
 
+  return { imported, errors };
+}
+
+export function importMockStocktakeAccountingStatuses(input: {
+  plantId: string;
+  stocktakeYear: number;
+  csvText: string;
+}) {
+  const lines = input.csvText.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  const store = readStore();
+  const config = getYearConfig(store, input.plantId, input.stocktakeYear);
+  if (!config) throw new Error("Year config not found");
+
+  let imported = 0;
+  const errors: string[] = [];
+
+  lines.forEach((line, index) => {
+    const [assetNoRaw, statusRaw] = line.split(",").map((x) => x.trim());
+    const assetNo = assetNoRaw || "";
+    const statusCode = (statusRaw || "").toUpperCase() as StocktakeAccountingStatusCode;
+    if (!assetNo) {
+      errors.push(`Line ${index + 1}: missing assetNo`);
+      return;
+    }
+    if (!["SUBMIT", "APPROVED", "REJECT"].includes(statusCode)) {
+      errors.push(`Line ${index + 1}: invalid accounting status`);
+      return;
+    }
+
+    const row = store.records.find(
+      (x) => x.PlantId === input.plantId && x.StocktakeYear === input.stocktakeYear && x.AssetNo === assetNo,
+    );
+    if (!row) {
+      errors.push(`Line ${index + 1}: asset not found in stocktake year`);
+      return;
+    }
+
+    row.AccountingStatusCode = statusCode;
+    row.AccountingStatusName = accountingStatusLabelMap[statusCode];
+    imported += 1;
+  });
+
+  saveStore(store);
   return { imported, errors };
 }
 
@@ -323,15 +415,23 @@ export function getMockStocktakeWorkspace(plantId: string, stocktakeYear: number
     StatusName: statusLabelMap[code],
     ItemCount: records.filter((x) => x.StatusCode === code).length,
   }));
+  const accountingSummary = [
+    "SUBMIT",
+    "APPROVED",
+    "REJECT",
+  ].map((code) => ({
+    StatusCode: code,
+    ItemCount: records.filter((x) => x.AccountingStatusCode === code).length,
+  }));
 
-  return { config, records, participants, meetingDocs, summary };
+  return { config, records, participants, meetingDocs, summary, accountingSummary };
 }
 
 export function getMockStocktakeThreeTabs(plantId: string, stocktakeYear: number) {
   const store = readStore();
   const records = store.records.filter((x) => x.PlantId === plantId && x.StocktakeYear === stocktakeYear);
   const counted = records.filter((x) => x.StatusCode === "COUNTED");
-  const rejected = records.filter((x) => x.StatusCode === "REJECTED");
+  const rejected = records.filter((x) => x.StatusCode === "PENDING" || x.StatusCode === "REJECTED");
 
   const assets = getMockAssetOptions();
   const notCounted = assets

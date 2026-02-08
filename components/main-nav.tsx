@@ -71,7 +71,7 @@ export function MainNav() {
       <div className="brand">
         <p className="brand__eyebrow">Mitrphol</p>
         <h2 className="brand__title">E-Asset Accounting</h2>
-        <p className="brand__sub">Frontend from req + OverAllDB</p>
+        <p className="brand__sub">ระบบจัดการทรัพย์สินสำหรับงานบัญชี</p>
       </div>
 
       <nav className="menu">
