@@ -87,6 +87,31 @@ export interface AssetDetailResponse {
   images: AssetImage[];
 }
 
+export type AssetMismatchType =
+  | "MISSING_IN_EASSET"
+  | "MISSING_IN_SAP"
+  | "PLANT_MISMATCH"
+  | "COSTCENTER_MISMATCH"
+  | "BOOKVALUE_MISMATCH"
+  | "ASSETNAME_MISMATCH";
+
+export interface AssetSapMismatchRow {
+  AssetNo: string;
+  AssetId?: string | null;
+  AssetName?: string | null;
+  SapAssetName?: string | null;
+  AssetBookValue?: number | null;
+  SapBookValue?: number | null;
+  AssetCompanyCode?: string | null;
+  SapCompanyCode?: string | null;
+  AssetPlantCode?: string | null;
+  SapPlantCode?: string | null;
+  AssetCostCenterCode?: string | null;
+  SapCostCenterCode?: string | null;
+  SapLastSeenAt?: string | null;
+  MismatchType: AssetMismatchType | string;
+}
+
 export interface DemolishRequestSummary {
   DemolishRequestId: string;
   RequestNo: string;

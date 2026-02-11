@@ -1,6 +1,7 @@
 import type {
   AssetDetailResponse,
   AssetRow,
+  AssetSapMismatchRow,
   LoginBeginResponse,
   LoginResponse,
   PlantAccess,
@@ -116,4 +117,23 @@ export async function getAssetDetail(sessionId: string, assetId: string) {
     method: "GET",
     sessionId,
   });
+}
+
+export async function getAssetsSapMismatch(
+  sessionId: string,
+  { limit = 1000, search = "" }: { limit?: number; search?: string } = {},
+) {
+  const qp = new URLSearchParams();
+  qp.set("limit", String(limit));
+  if (search.trim()) qp.set("search", search.trim());
+
+  const response = await requestJson<{ ok: boolean; rows: AssetSapMismatchRow[] }>(
+    `/assets/sap-mismatch?${qp.toString()}`,
+    {
+      method: "GET",
+      sessionId,
+    },
+  );
+
+  return response.rows;
 }
