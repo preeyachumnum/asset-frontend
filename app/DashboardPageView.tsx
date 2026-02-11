@@ -1,7 +1,10 @@
+﻿"use client";
+
 import Link from "next/link";
 
 import { PageTitle } from "@/components/page-title";
 import { approvalFlows } from "@/lib/mock-data";
+import { useSession } from "@/lib/session";
 
 type ModuleCard = {
   title: string;
@@ -53,6 +56,10 @@ const moduleCards: ModuleCard[] = [
 ];
 
 export default function Home() {
+  const session = useSession();
+  const isLoggedIn = Boolean(session?.sessionId);
+  const profileLabel = session?.user.displayName || session?.user.email || "Profile";
+
   return (
     <div className="dashboard-layout">
       <PageTitle
@@ -60,9 +67,15 @@ export default function Home() {
         subtitle="ภาพรวมการทำงานหลักของระบบทรัพย์สิน"
         actions={
           <>
-            <Link href="/login" className="button button--ghost">
-              เข้าสู่ระบบ
-            </Link>
+            {isLoggedIn ? (
+              <Link href="/profile" className="button button--ghost" title={profileLabel}>
+                Profile
+              </Link>
+            ) : (
+              <Link href="/login" className="button button--ghost">
+                เข้าสู่ระบบ
+              </Link>
+            )}
             <Link href="/assets" className="button button--primary">
               เริ่มใช้งาน
             </Link>

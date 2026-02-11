@@ -12,6 +12,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Trash2,
+  UserCircle2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -33,6 +34,7 @@ const menu: NavItem[] = [
   { href: "/reports", label: "รายงาน", icon: FileBarChart2 },
   { href: "/sync", label: "Auto Sync SAP", icon: RefreshCw },
   { href: "/roles", label: "User Roles", icon: ShieldCheck },
+  { href: "/profile", label: "Profile", icon: UserCircle2 },
 ];
 
 export function MainNav() {

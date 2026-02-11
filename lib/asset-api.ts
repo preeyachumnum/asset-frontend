@@ -1,9 +1,11 @@
 import type {
   AssetDetailResponse,
+  PagingMeta,
   AssetRow,
   AssetSapMismatchRow,
   LoginBeginResponse,
   LoginResponse,
+  PagedRows,
   PlantAccess,
 } from "@/lib/types";
 
@@ -93,23 +95,66 @@ export async function authLogout(sessionId: string) {
   });
 }
 
-export async function getAssets(sessionId: string) {
-  const response = await requestJson<{ ok: boolean; rows: AssetRow[] }>("/assets", {
+function toPaging(raw: PagingMeta | undefined): PagingMeta {
+  if (!raw) {
+    return { page: 1, pageSize: 50, totalRows: 0, totalPages: 0 };
+  }
+
+  return {
+    page: Number(raw.page || 1),
+    pageSize: Number(raw.pageSize || 50),
+    totalRows: Number(raw.totalRows || 0),
+    totalPages: Number(raw.totalPages || 0),
+  };
+}
+
+type PagedApiResponse<T> = {
+  ok: boolean;
+  rows: T[];
+  paging: PagingMeta;
+};
+
+export async function getAssets(
+  sessionId: string,
+  { page = 1, pageSize = 50, search = "" }: { page?: number; pageSize?: number; search?: string } = {}
+): Promise<PagedRows<AssetRow>> {
+  const qp = new URLSearchParams();
+  qp.set("page", String(page));
+  qp.set("pageSize", String(pageSize));
+  if (search.trim()) qp.set("search", search.trim());
+
+  const response = await requestJson<PagedApiResponse<AssetRow>>(`/assets?${qp.toString()}`, {
     method: "GET",
     sessionId,
   });
-  return response.rows;
+
+  return {
+    rows: response.rows || [],
+    paging: toPaging(response.paging),
+  };
 }
 
-export async function getAssetsNoImage(sessionId: string) {
-  const response = await requestJson<{ ok: boolean; rows: AssetRow[] }>(
-    "/assets/no-image",
+export async function getAssetsNoImage(
+  sessionId: string,
+  { page = 1, pageSize = 50, search = "" }: { page?: number; pageSize?: number; search?: string } = {}
+): Promise<PagedRows<AssetRow>> {
+  const qp = new URLSearchParams();
+  qp.set("page", String(page));
+  qp.set("pageSize", String(pageSize));
+  if (search.trim()) qp.set("search", search.trim());
+
+  const response = await requestJson<PagedApiResponse<AssetRow>>(
+    `/assets/no-image?${qp.toString()}`,
     {
       method: "GET",
       sessionId,
     },
   );
-  return response.rows;
+
+  return {
+    rows: response.rows || [],
+    paging: toPaging(response.paging),
+  };
 }
 
 export async function getAssetDetail(sessionId: string, assetId: string) {
@@ -121,13 +166,14 @@ export async function getAssetDetail(sessionId: string, assetId: string) {
 
 export async function getAssetsSapMismatch(
   sessionId: string,
-  { limit = 1000, search = "" }: { limit?: number; search?: string } = {},
-) {
+  { page = 1, pageSize = 50, search = "" }: { page?: number; pageSize?: number; search?: string } = {},
+): Promise<PagedRows<AssetSapMismatchRow>> {
   const qp = new URLSearchParams();
-  qp.set("limit", String(limit));
+  qp.set("page", String(page));
+  qp.set("pageSize", String(pageSize));
   if (search.trim()) qp.set("search", search.trim());
 
-  const response = await requestJson<{ ok: boolean; rows: AssetSapMismatchRow[] }>(
+  const response = await requestJson<PagedApiResponse<AssetSapMismatchRow>>(
     `/assets/sap-mismatch?${qp.toString()}`,
     {
       method: "GET",
@@ -135,5 +181,8 @@ export async function getAssetsSapMismatch(
     },
   );
 
-  return response.rows;
+  return {
+    rows: response.rows || [],
+    paging: toPaging(response.paging),
+  };
 }

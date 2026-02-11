@@ -87,6 +87,18 @@ export interface AssetDetailResponse {
   images: AssetImage[];
 }
 
+export interface PagingMeta {
+  page: number;
+  pageSize: number;
+  totalRows: number;
+  totalPages: number;
+}
+
+export interface PagedRows<T> {
+  rows: T[];
+  paging: PagingMeta;
+}
+
 export type AssetMismatchType =
   | "MISSING_IN_EASSET"
   | "MISSING_IN_SAP"

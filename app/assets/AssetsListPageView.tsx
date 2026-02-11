@@ -1,96 +1,147 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { PageTitle } from "@/components/page-title";
 import { StatusChip } from "@/components/status-chip";
 import { ApiError, getAssets, getAssetsNoImage, getAssetsSapMismatch } from "@/lib/asset-api";
 import { formatMoney } from "@/lib/format";
-import { readSession } from "@/lib/session";
-import type { AssetRow, AssetSapMismatchRow } from "@/lib/types";
+import { readSession, useSession } from "@/lib/session";
+import type { AssetRow, AssetSapMismatchRow, PagingMeta } from "@/lib/types";
 
 type TabType = "all" | "no-image" | "sap-gap";
+
+type TabRows = {
+  all: AssetRow[];
+  "no-image": AssetRow[];
+  "sap-gap": AssetSapMismatchRow[];
+};
+
+type TabPaging = {
+  all: PagingMeta;
+  "no-image": PagingMeta;
+  "sap-gap": PagingMeta;
+};
+
+type TabLoaded = Record<TabType, boolean>;
+type TabPages = Record<TabType, number>;
+
+const EMPTY_PAGING: PagingMeta = {
+  page: 1,
+  pageSize: 50,
+  totalRows: 0,
+  totalPages: 0,
+};
 
 function asNumber(v: unknown) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
-function assetSearchText(row: AssetRow) {
-  return [
-    row.AssetNo,
-    row.AssetName,
-    row.PlantId,
-    row.CostCenterId,
-    row.LocationId,
-    row.AssetStatusId,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
-function mismatchSearchText(row: AssetSapMismatchRow) {
-  return [
-    row.AssetNo,
-    row.AssetName,
-    row.SapAssetName,
-    row.AssetPlantCode,
-    row.SapPlantCode,
-    row.AssetCostCenterCode,
-    row.SapCostCenterCode,
-    row.MismatchType,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
 export default function AssetsListPageView() {
   const router = useRouter();
   const [tab, setTab] = useState<TabType>("all");
-  const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [pageSize, setPageSize] = useState(50);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [refreshTick, setRefreshTick] = useState(0);
 
-  const [allRows, setAllRows] = useState<AssetRow[]>([]);
-  const [noImageRows, setNoImageRows] = useState<AssetRow[]>([]);
-  const [sapGapRows, setSapGapRows] = useState<AssetSapMismatchRow[]>([]);
+  const [pages, setPages] = useState<TabPages>({
+    all: 1,
+    "no-image": 1,
+    "sap-gap": 1,
+  });
+
+  const [rowsByTab, setRowsByTab] = useState<TabRows>({
+    all: [],
+    "no-image": [],
+    "sap-gap": [],
+  });
+
+  const [pagingByTab, setPagingByTab] = useState<TabPaging>({
+    all: EMPTY_PAGING,
+    "no-image": EMPTY_PAGING,
+    "sap-gap": EMPTY_PAGING,
+  });
+
+  const [loadedByTab, setLoadedByTab] = useState<TabLoaded>({
+    all: false,
+    "no-image": false,
+    "sap-gap": false,
+  });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+
     const tabParam = new URLSearchParams(window.location.search).get("tab");
     if (tabParam === "no-image" || tabParam === "sap-gap") {
       setTab(tabParam);
     }
   }, []);
 
+  const session = useSession();
+  const sessionId = session?.sessionId || null;
+
   useEffect(() => {
+    if (sessionId) return;
+    const current = readSession();
+    if (!current?.sessionId) router.push("/login");
+  }, [router, sessionId]);
+
+  const currentPage = pages[tab];
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const sid = sessionId;
+
     let cancelled = false;
 
-    async function load() {
-      const session = readSession();
-      if (!session?.sessionId) {
-        router.push("/login");
-        return;
-      }
-
+    async function loadCurrentTab() {
       setLoading(true);
       setError("");
+
       try {
-        const [all, noImage, sapGap] = await Promise.all([
-          getAssets(session.sessionId),
-          getAssetsNoImage(session.sessionId),
-          getAssetsSapMismatch(session.sessionId, { limit: 5000 }),
-        ]);
+        if (tab === "all") {
+          const response = await getAssets(sid, {
+            page: currentPage,
+            pageSize,
+            search: searchTerm,
+          });
+
+          if (cancelled) return;
+          setRowsByTab((prev) => ({ ...prev, all: response.rows }));
+          setPagingByTab((prev) => ({ ...prev, all: response.paging }));
+          setLoadedByTab((prev) => ({ ...prev, all: true }));
+          return;
+        }
+
+        if (tab === "no-image") {
+          const response = await getAssetsNoImage(sid, {
+            page: currentPage,
+            pageSize,
+            search: searchTerm,
+          });
+
+          if (cancelled) return;
+          setRowsByTab((prev) => ({ ...prev, "no-image": response.rows }));
+          setPagingByTab((prev) => ({ ...prev, "no-image": response.paging }));
+          setLoadedByTab((prev) => ({ ...prev, "no-image": true }));
+          return;
+        }
+
+        const response = await getAssetsSapMismatch(sid, {
+          page: currentPage,
+          pageSize,
+          search: searchTerm,
+        });
 
         if (cancelled) return;
-        setAllRows(all);
-        setNoImageRows(noImage);
-        setSapGapRows(sapGap);
+        setRowsByTab((prev) => ({ ...prev, "sap-gap": response.rows }));
+        setPagingByTab((prev) => ({ ...prev, "sap-gap": response.paging }));
+        setLoadedByTab((prev) => ({ ...prev, "sap-gap": true }));
       } catch (e) {
         if (cancelled) return;
         const msg = e instanceof ApiError ? e.message : "Failed to load assets";
@@ -100,72 +151,69 @@ export default function AssetsListPageView() {
       }
     }
 
-    load();
+    loadCurrentTab();
+
     return () => {
       cancelled = true;
     };
-  }, [router, refreshTick]);
+  }, [currentPage, pageSize, searchTerm, sessionId, tab]);
 
-  const filteredAll = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return allRows;
-    return allRows.filter((x) => assetSearchText(x).includes(q));
-  }, [allRows, search]);
+  const currentRows = useMemo(() => {
+    if (tab === "all") return rowsByTab.all;
+    if (tab === "no-image") return rowsByTab["no-image"];
+    return rowsByTab["sap-gap"];
+  }, [rowsByTab, tab]);
 
-  const filteredNoImage = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return noImageRows;
-    return noImageRows.filter((x) => assetSearchText(x).includes(q));
-  }, [noImageRows, search]);
+  const currentPaging = pagingByTab[tab];
+  const hasPrev = currentPage > 1;
+  const hasNext = currentPaging.totalPages > currentPage;
 
-  const filteredSapGap = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return sapGapRows;
-    return sapGapRows.filter((x) => mismatchSearchText(x).includes(q));
-  }, [sapGapRows, search]);
+  function onSubmitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPages((prev) => ({ ...prev, [tab]: 1 }));
+    setSearchTerm(searchInput.trim());
+  }
 
-  const mismatchCount = sapGapRows.length;
-  const rowsShown =
-    tab === "all"
-      ? filteredAll.length
-      : tab === "no-image"
-        ? filteredNoImage.length
-        : filteredSapGap.length;
+  function onChangePage(nextPage: number) {
+    setPages((prev) => ({ ...prev, [tab]: nextPage }));
+  }
+
+  function onChangeTab(nextTab: TabType) {
+    setTab(nextTab);
+  }
+
+  function onChangePageSize(nextSize: number) {
+    setPageSize(nextSize);
+    setPages({ all: 1, "no-image": 1, "sap-gap": 1 });
+  }
 
   return (
     <>
       <PageTitle
         title="รายการทรัพย์สิน"
-        subtitle="ครอบคลุมรายการทั้งหมด, รายการไม่มีรูป และรายการที่ข้อมูล SAP ไม่ตรงกับระบบ"
+        subtitle="โหลดข้อมูลแบบแบ่งหน้า (Pagination)"
         actions={
           <>
             <button
               className={`button ${tab === "all" ? "button--primary" : "button--ghost"}`}
-              onClick={() => setTab("all")}
+              onClick={() => onChangeTab("all")}
               type="button"
             >
               ทั้งหมด
             </button>
             <button
               className={`button ${tab === "no-image" ? "button--primary" : "button--ghost"}`}
-              onClick={() => setTab("no-image")}
+              onClick={() => onChangeTab("no-image")}
               type="button"
             >
               ไม่มีรูป
             </button>
             <button
               className={`button ${tab === "sap-gap" ? "button--primary" : "button--ghost"}`}
-              onClick={() => setTab("sap-gap")}
+              onClick={() => onChangeTab("sap-gap")}
               type="button"
             >
               SAP mismatch
-            </button>
-            <button
-              className="button button--ghost"
-              type="button"
-              onClick={() => setRefreshTick((x) => x + 1)}
-            >
-              Refresh
             </button>
           </>
         }
@@ -175,39 +223,59 @@ export default function AssetsListPageView() {
         <div className="kpi-grid">
           <div className="kpi">
             <h3>สินทรัพย์ทั้งหมด</h3>
-            <p>{allRows.length}</p>
+            <p>{loadedByTab.all ? pagingByTab.all.totalRows : "-"}</p>
           </div>
           <div className="kpi">
             <h3>ไม่มีรูป</h3>
-            <p>{noImageRows.length}</p>
+            <p>{loadedByTab["no-image"] ? pagingByTab["no-image"].totalRows : "-"}</p>
           </div>
           <div className="kpi">
             <h3>SAP mismatch</h3>
-            <p>{mismatchCount}</p>
+            <p>{loadedByTab["sap-gap"] ? pagingByTab["sap-gap"].totalRows : "-"}</p>
           </div>
           <div className="kpi">
-            <h3>แสดงผล</h3>
-            <p>{rowsShown}</p>
+            <h3>หน้า</h3>
+            <p>{currentPaging.totalPages > 0 ? `${currentPage}/${currentPaging.totalPages}` : "-"}</p>
           </div>
         </div>
       </section>
 
       <section className="panel">
-        <div className="form-grid">
+        <form className="form-grid" onSubmit={onSubmitSearch}>
           <div className="field">
             <label htmlFor="search">ค้นหา</label>
             <input
               id="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Asset no / name / cost center / plant"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder="Asset no / name"
             />
           </div>
+
           <div className="field">
-            <label>โหมด</label>
-            <input value={tab} disabled />
+            <label htmlFor="mode">โหมด</label>
+            <input id="mode" value={tab} disabled />
           </div>
-        </div>
+
+          <div className="field">
+            <label htmlFor="pageSize">ต่อหน้า</label>
+            <select
+              id="pageSize"
+              value={pageSize}
+              onChange={(event) => onChangePageSize(Number(event.target.value))}
+            >
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </div>
+
+          <div className="field" style={{ alignSelf: "end" }}>
+            <button className="button button--primary" type="submit">
+              ค้นหา
+            </button>
+          </div>
+        </form>
       </section>
 
       {error ? (
@@ -238,7 +306,7 @@ export default function AssetsListPageView() {
                 </tr>
               </thead>
               <tbody>
-                {(tab === "all" ? filteredAll : filteredNoImage).map((asset) => (
+                {(currentRows as AssetRow[]).map((asset) => (
                   <tr key={asset.AssetId}>
                     <td>{asset.AssetNo}</td>
                     <td>{asset.AssetName}</td>
@@ -247,11 +315,7 @@ export default function AssetsListPageView() {
                       <StatusChip status={asset.IsActive === false ? "INACTIVE" : "ACTIVE"} />
                     </td>
                     <td>
-                      {[
-                        asset.PlantId || "-",
-                        asset.CostCenterId || "-",
-                        asset.LocationId || "-",
-                      ].join(" / ")}
+                      {[asset.PlantId || "-", asset.CostCenterId || "-", asset.LocationId || "-"].join(" / ")}
                     </td>
                     <td>{tab === "no-image" ? "No image" : "-"}</td>
                     <td>
@@ -261,7 +325,7 @@ export default function AssetsListPageView() {
                     </td>
                   </tr>
                 ))}
-                {(tab === "all" ? filteredAll : filteredNoImage).length === 0 ? (
+                {currentRows.length === 0 ? (
                   <tr>
                     <td colSpan={7}>No assets found.</td>
                   </tr>
@@ -288,7 +352,7 @@ export default function AssetsListPageView() {
                 </tr>
               </thead>
               <tbody>
-                {filteredSapGap.map((row, idx) => (
+                {(currentRows as AssetSapMismatchRow[]).map((row, idx) => (
                   <tr key={`${row.AssetNo}-${row.MismatchType}-${idx}`}>
                     <td>{row.AssetNo}</td>
                     <td>
@@ -321,7 +385,7 @@ export default function AssetsListPageView() {
                     </td>
                   </tr>
                 ))}
-                {filteredSapGap.length === 0 ? (
+                {currentRows.length === 0 ? (
                   <tr>
                     <td colSpan={7}>No SAP mismatch rows.</td>
                   </tr>
@@ -331,6 +395,27 @@ export default function AssetsListPageView() {
           </div>
         </section>
       ) : null}
+
+      <section className="panel">
+        <div className="page-head__actions">
+          <button
+            className="button button--ghost"
+            disabled={!hasPrev || loading}
+            onClick={() => onChangePage(currentPage - 1)}
+            type="button"
+          >
+            ก่อนหน้า
+          </button>
+          <button
+            className="button button--ghost"
+            disabled={!hasNext || loading}
+            onClick={() => onChangePage(currentPage + 1)}
+            type="button"
+          >
+            ถัดไป
+          </button>
+        </div>
+      </section>
     </>
   );
 }
