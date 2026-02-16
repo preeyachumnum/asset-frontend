@@ -8,7 +8,7 @@ import { PageTitle } from "@/components/page-title";
 import { StatusChip } from "@/components/status-chip";
 import { ApiError, getAssets, getAssetsNoImage, getAssetsSapMismatch } from "@/lib/asset-api";
 import { formatMoney } from "@/lib/format";
-import { readSession, useSession } from "@/lib/session";
+import { clearSession, readSession, useHydrated, useSession } from "@/lib/session";
 import type { AssetRow, AssetSapMismatchRow, PagingMeta } from "@/lib/types";
 
 type TabType = "all" | "no-image" | "sap-gap";
@@ -38,6 +38,28 @@ const EMPTY_PAGING: PagingMeta = {
 function asNumber(v: unknown) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function codeName(code?: string | null, name?: string | null) {
+  const c = String(code || "").trim();
+  const n = String(name || "").trim();
+  if (c && n && c !== n) return `${c} (${n})`;
+  if (c) return c;
+  if (n) return n;
+  return "-";
+}
+
+function toBool(v: unknown) {
+  if (typeof v === "boolean") return v;
+  const n = Number(v);
+  if (Number.isFinite(n)) return n > 0;
+  const s = String(v ?? "").trim().toLowerCase();
+  return s === "true" || s === "1" || s === "yes";
+}
+
+function hasImage(asset: AssetRow, tab: TabType) {
+  if (tab === "no-image") return false;
+  return toBool(asset.HasImage);
 }
 
 export default function AssetsListPageView() {
@@ -83,19 +105,26 @@ export default function AssetsListPageView() {
   }, []);
 
   const session = useSession();
-  const sessionId = session?.sessionId || null;
+  const hydrated = useHydrated();
+  const effectiveSessionId = useMemo(() => {
+    if (!hydrated) return "";
+    const fromHook = String(session?.sessionId || "").trim();
+    if (fromHook) return fromHook;
+    return String(readSession()?.sessionId || "").trim();
+  }, [hydrated, session?.sessionId]);
 
   useEffect(() => {
-    if (sessionId) return;
-    const current = readSession();
-    if (!current?.sessionId) router.push("/login");
-  }, [router, sessionId]);
+    if (!hydrated) return;
+    if (effectiveSessionId) return;
+    clearSession();
+    router.replace("/login");
+  }, [effectiveSessionId, hydrated, router]);
 
   const currentPage = pages[tab];
 
   useEffect(() => {
-    if (!sessionId) return;
-    const sid = sessionId;
+    if (!hydrated || !effectiveSessionId) return;
+    const sid = effectiveSessionId;
 
     let cancelled = false;
 
@@ -144,6 +173,12 @@ export default function AssetsListPageView() {
         setLoadedByTab((prev) => ({ ...prev, "sap-gap": true }));
       } catch (e) {
         if (cancelled) return;
+        if (e instanceof ApiError && e.status === 401) {
+          clearSession();
+          setError("Invalid or expired session.");
+          router.replace("/login");
+          return;
+        }
         const msg = e instanceof ApiError ? e.message : "Failed to load assets";
         setError(msg);
       } finally {
@@ -156,7 +191,7 @@ export default function AssetsListPageView() {
     return () => {
       cancelled = true;
     };
-  }, [currentPage, pageSize, searchTerm, sessionId, tab]);
+  }, [currentPage, effectiveSessionId, hydrated, pageSize, router, searchTerm, tab]);
 
   const currentRows = useMemo(() => {
     if (tab === "all") return rowsByTab.all;
@@ -315,9 +350,19 @@ export default function AssetsListPageView() {
                       <StatusChip status={asset.IsActive === false ? "INACTIVE" : "ACTIVE"} />
                     </td>
                     <td>
-                      {[asset.PlantId || "-", asset.CostCenterId || "-", asset.LocationId || "-"].join(" / ")}
+                      {[
+                        codeName(asset.PlantCode, asset.PlantName),
+                        codeName(asset.CostCenterCode, asset.CostCenterName),
+                        codeName(asset.LocationCode, asset.LocationName),
+                      ].join(" / ")}
                     </td>
-                    <td>{tab === "no-image" ? "No image" : "-"}</td>
+                    <td>
+                      {hasImage(asset, tab) ? (
+                        <span className="status-chip status-chip--positive">มีรูป</span>
+                      ) : (
+                        <span className="status-chip status-chip--neutral">ไม่มีรูป</span>
+                      )}
+                    </td>
                     <td>
                       <Link className="button button--ghost" href={`/assets/${asset.AssetId}`}>
                         Detail

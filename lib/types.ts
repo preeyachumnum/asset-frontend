@@ -50,24 +50,31 @@ export interface SessionPayload {
 export interface AssetRow {
   AssetId: string;
   CompanyId?: string;
+  CompanyCode?: string;
+  CompanyName?: string;
   PlantId?: string;
+  PlantCode?: string;
+  PlantName?: string;
   CostCenterId?: string;
+  CostCenterCode?: string;
+  CostCenterName?: string;
   LocationId?: string;
+  LocationCode?: string;
+  LocationName?: string;
   AssetGroupId?: string;
   AssetStatusId?: string;
+  StatusCode?: string;
+  StatusName?: string;
   AssetNo: string;
   AssetName: string;
   BookValue: number;
   ReceiveDate?: string | null;
   QrValue?: string | null;
   QrTypeCode?: string | null;
+  HasImage?: boolean | number | null;
   IsActive?: boolean;
   CreatedAt?: string;
   UpdatedAt?: string;
-  StatusName?: string;
-  PlantName?: string;
-  CostCenterName?: string;
-  LocationName?: string;
 }
 
 export interface AssetImage {

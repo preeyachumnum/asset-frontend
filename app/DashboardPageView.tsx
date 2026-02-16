@@ -4,7 +4,7 @@ import Link from "next/link";
 
 import { PageTitle } from "@/components/page-title";
 import { approvalFlows } from "@/lib/mock-data";
-import { useSession } from "@/lib/session";
+import { useHydrated, useSession } from "@/lib/session";
 
 type ModuleCard = {
   title: string;
@@ -21,7 +21,7 @@ const moduleCards: ModuleCard[] = [
     links: [
       { label: "รายการทรัพย์สินทั้งหมด", href: "/assets" },
       { label: "ทรัพย์สินที่ไม่มีรูปภาพ", href: "/assets?tab=no-image" },
-      { label: "กรอง/ค้นหา", href: "/assets" },
+      { label: "ปัญหาข้อมูล SAP ไม่ตรงระบบ", href: "/assets?tab=sap-gap" },
     ],
   },
   {
@@ -57,7 +57,8 @@ const moduleCards: ModuleCard[] = [
 
 export default function Home() {
   const session = useSession();
-  const isLoggedIn = Boolean(session?.sessionId);
+  const hydrated = useHydrated();
+  const isLoggedIn = hydrated && Boolean(session?.sessionId);
   const profileLabel = session?.user.displayName || session?.user.email || "Profile";
 
   return (

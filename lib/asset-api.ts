@@ -24,16 +24,21 @@ type RequestOptions = RequestInit & {
   sessionId?: string;
 };
 
+function buildApiUrl(path: string) {
+  return `${API_BASE}${path}`;
+}
+
 async function requestJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
-  if (options.sessionId) {
-    headers.set("x-session-id", options.sessionId);
+  const sid = typeof options.sessionId === "string" ? options.sessionId.trim() : "";
+  if (sid) {
+    headers.set("x-session-id", sid);
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     ...options,
     headers,
     cache: "no-store",
@@ -184,5 +189,54 @@ export async function getAssetsSapMismatch(
   return {
     rows: response.rows || [],
     paging: toPaging(response.paging),
+  };
+}
+
+export function toApiFileUrl(fileUrl: string) {
+  const s = String(fileUrl || "").trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) return s;
+  return s.startsWith("/") ? buildApiUrl(s) : buildApiUrl(`/${s}`);
+}
+
+export async function uploadAssetImage(
+  sessionId: string,
+  assetId: string,
+  file: File,
+  { isPrimary = false }: { isPrimary?: boolean } = {}
+) {
+  const form = new FormData();
+  form.append("image", file);
+  form.append("isPrimary", isPrimary ? "1" : "0");
+
+  const headers = new Headers();
+  const sid = String(sessionId || "").trim();
+  if (sid) headers.set("x-session-id", sid);
+
+  const response = await fetch(buildApiUrl(`/assets/${assetId}/images`), {
+    method: "POST",
+    headers,
+    body: form,
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || (payload && payload.ok === false)) {
+    throw new ApiError(payload?.message || `API error (${response.status})`, response.status);
+  }
+
+  return payload as {
+    ok: boolean;
+    image?: {
+      AssetImageId?: string;
+      AssetId?: string;
+      FileUrl?: string;
+      IsPrimary?: boolean;
+      SortOrder?: number;
+      UploadedAt?: string;
+    } | null;
+    file?: {
+      provider?: string;
+      fileUrl?: string;
+    };
   };
 }

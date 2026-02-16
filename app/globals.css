@@ -397,4 +397,125 @@
     @apply mt-1.5 text-[2.2rem] text-[#143f67];
     font-family: var(--font-heading), "Segoe UI", sans-serif;
   }
+
+  .asset-upload-head {
+    @apply mb-3 grid gap-1;
+  }
+
+  .asset-upload-head h3 {
+    @apply text-[1.05rem];
+    font-family: var(--font-heading), "Segoe UI", sans-serif;
+  }
+
+  .asset-upload-layout {
+    @apply grid grid-cols-1 gap-3 lg:grid-cols-[minmax(300px,1.3fr)_minmax(220px,1fr)_minmax(180px,auto)];
+  }
+
+  .asset-upload-filebox {
+    @apply rounded-xl border border-[#d5e4f2] bg-[#f6fbff] p-3;
+  }
+
+  .asset-upload-filebox > label {
+    @apply mb-1.5 block text-sm font-semibold text-[color:var(--text-muted)];
+  }
+
+  .asset-upload-input {
+    @apply sr-only;
+  }
+
+  .asset-upload-picker {
+    @apply inline-flex min-h-10 cursor-pointer items-center justify-center rounded-xl border border-[#8eb4d8] bg-gradient-to-b from-[#f2f8ff] to-[#e3effc] px-3.5 py-2.5 text-sm font-semibold text-[#1f517a] transition-all duration-200;
+  }
+
+  .asset-upload-picker:hover {
+    @apply -translate-y-px border-[#5e94c8] shadow-lg;
+    background: linear-gradient(180deg, #ecf5ff 0%, #d6e8fb 100%);
+  }
+
+  .asset-upload-filemeta {
+    @apply mt-2.5 break-all text-sm font-semibold text-[#244d71];
+  }
+
+  .asset-upload-action {
+    @apply flex items-end;
+  }
+
+  .asset-upload-action .button {
+    @apply w-full lg:w-auto;
+    min-width: 180px;
+  }
+
+  .asset-gallery-head {
+    @apply mb-3 flex items-center justify-between gap-2;
+  }
+
+  .asset-gallery-head h3 {
+    @apply text-[1.05rem];
+    font-family: var(--font-heading), "Segoe UI", sans-serif;
+  }
+
+  .asset-gallery-grid {
+    @apply grid grid-cols-1 gap-3 lg:grid-cols-2;
+  }
+
+  .asset-image-card {
+    @apply overflow-hidden rounded-2xl border border-[#d3e3f2] bg-[#fcfeff] p-2.5 shadow-[0_10px_24px_rgba(24,56,88,0.1)];
+  }
+
+  .asset-image-frame {
+    @apply relative block overflow-hidden rounded-xl border border-[#d6e5f2] bg-[#edf4fb];
+  }
+
+  .asset-image-frame img {
+    @apply h-[250px] w-full object-cover transition-transform duration-200;
+  }
+
+  .asset-image-frame:hover img {
+    @apply scale-[1.02];
+  }
+
+  .asset-image-badge {
+    @apply absolute left-2 top-2 rounded-full px-2.5 py-1 text-xs font-bold;
+  }
+
+  .asset-image-badge--primary {
+    @apply bg-[#1e9974e8] text-white;
+  }
+
+  .asset-image-badge--secondary {
+    @apply bg-[#355e85d9] text-white;
+  }
+
+  .asset-image-meta {
+    @apply mt-2.5 flex items-center justify-between gap-2;
+  }
+
+  .asset-image-name {
+    @apply text-sm font-semibold text-[#204b70];
+  }
+
+  .asset-gallery-simple-head {
+    @apply mb-3 flex items-center justify-between;
+  }
+
+  .asset-gallery-simple-head h3 {
+    @apply text-base;
+    font-family: var(--font-heading), "Segoe UI", sans-serif;
+  }
+
+  .asset-gallery-simple-grid {
+    @apply grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3;
+  }
+
+  .asset-photo-card {
+    @apply rounded-xl border border-[#d8e3ef] bg-white p-2.5;
+  }
+
+  .asset-photo {
+    @apply h-48 w-full rounded-lg border border-[#dce7f3] object-cover;
+  }
+
+  .asset-photo-meta {
+    @apply mt-2 flex items-center justify-between gap-2;
+  }
 }

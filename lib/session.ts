@@ -5,6 +5,7 @@ const SESSION_KEY = "asset_frontend_session";
 const listeners = new Set<() => void>();
 let cachedRaw: string | null | undefined;
 let cachedSnapshot: SessionPayload | null = null;
+const subscribeNoop = () => () => {};
 
 function emitSessionChange() {
   listeners.forEach((listener) => listener());
@@ -76,4 +77,8 @@ export function clearSession() {
 
 export function useSession() {
   return useSyncExternalStore(subscribe, getClientSnapshot, getServerSnapshot);
+}
+
+export function useHydrated() {
+  return useSyncExternalStore(subscribeNoop, () => true, () => false);
 }
