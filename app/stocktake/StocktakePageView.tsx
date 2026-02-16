@@ -1,10 +1,11 @@
 ﻿"use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 
 import { PageTitle } from "@/components/page-title";
 import { StatusChip } from "@/components/status-chip";
+import { UploadFileControl } from "@/components/upload-file-control";
 import { formatDate, formatMoney } from "@/lib/format";
 import { getMockAssetOptions } from "@/lib/mock-assets-service";
 import {
@@ -49,6 +50,13 @@ const EMPTY_TABS: ReturnType<typeof getMockStocktakeThreeTabs> = {
 
 const subscribeHydration = () => () => {};
 
+type PopupLevel = "info" | "success" | "error";
+type PopupState = {
+  title: string;
+  message: string;
+  level: PopupLevel;
+} | null;
+
 function downloadTextFile(fileName: string, text: string) {
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -59,13 +67,27 @@ function downloadTextFile(fileName: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
+function formatFileSize(size: number) {
+  if (!Number.isFinite(size) || size <= 0) return "-";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function formatImportResultMessage(title: string, imported: number, errors: string[]) {
+  if (!errors.length) return `${title}: imported ${imported} rows.`;
+  const preview = errors.slice(0, 5).join(" | ");
+  const more = errors.length > 5 ? ` | ...(+${errors.length - 5} more)` : "";
+  return `${title}: imported ${imported} rows, ${errors.length} error(s). ${preview}${more}`;
+}
+
 export default function StocktakePageView() {
   const currentYear = new Date().getUTCFullYear();
   const [plantId, setPlantId] = useState("Plant-KLS");
   const [stocktakeYear, setStocktakeYear] = useState(currentYear);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
-  const [message, setMessage] = useState("");
+  const [popup, setPopup] = useState<PopupState>(null);
 
   const [countCostCenter, setCountCostCenter] = useState("");
   const [assetNo, setAssetNo] = useState("");
@@ -77,6 +99,8 @@ export default function StocktakePageView() {
   const [imageNames, setImageNames] = useState("");
   const [csvText, setCsvText] = useState("");
   const [accountingCsvText, setAccountingCsvText] = useState("");
+  const [countImportFileLabel, setCountImportFileLabel] = useState("ยังไม่ได้เลือกไฟล์");
+  const [accountingImportFileLabel, setAccountingImportFileLabel] = useState("ยังไม่ได้เลือกไฟล์");
 
   const [participantEmail, setParticipantEmail] = useState("");
   const [meetingDocName, setMeetingDocName] = useState("");
@@ -174,8 +198,15 @@ export default function StocktakePageView() {
     };
   }, [qrValue]);
 
-  function notify(text: string) {
-    setMessage(text);
+  function notify(text: string, level: PopupLevel = "info", title?: string) {
+    const popupTitle =
+      title ||
+      (level === "error" ? "เกิดข้อผิดพลาด" : level === "success" ? "สำเร็จ" : "แจ้งเตือน");
+    setPopup({
+      title: popupTitle,
+      message: text,
+      level,
+    });
   }
 
   function onSubmitCount(event: FormEvent<HTMLFormElement>) {
@@ -198,9 +229,9 @@ export default function StocktakePageView() {
       });
       setNoteText("");
       setImageNames("");
-      notify("Saved stocktake record.");
+      notify("Saved stocktake record.", "success");
     } catch (error) {
-      notify((error as Error).message);
+      notify((error as Error).message, "error");
     }
   }
 
@@ -212,10 +243,15 @@ export default function StocktakePageView() {
         csvText,
         countedByName: countedBy,
       });
-      notify(`Imported ${result.imported} rows. ${result.errors.length ? `Errors: ${result.errors.join(" | ")}` : ""}`);
-      setCsvText("");
+      notify(
+        formatImportResultMessage("Import count CSV", result.imported, result.errors),
+        result.errors.length ? "error" : "success",
+      );
+      if (!result.errors.length) {
+        setCsvText("");
+      }
     } catch (error) {
-      notify((error as Error).message);
+      notify((error as Error).message, "error");
     }
   }
 
@@ -226,24 +262,35 @@ export default function StocktakePageView() {
         stocktakeYear,
         csvText: accountingCsvText,
       });
-      notify(`Imported accounting status ${result.imported} rows. ${result.errors.length ? `Errors: ${result.errors.join(" | ")}` : ""}`);
-      setAccountingCsvText("");
+      notify(
+        formatImportResultMessage("Import accounting status", result.imported, result.errors),
+        result.errors.length ? "error" : "success",
+      );
+      if (!result.errors.length) {
+        setAccountingCsvText("");
+      }
     } catch (error) {
-      notify((error as Error).message);
+      notify((error as Error).message, "error");
     }
   }
 
-  function onImportCsvFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  function onImportCsvFile(file: File | null) {
+    if (!file) {
+      setCountImportFileLabel("ยังไม่ได้เลือกไฟล์");
+      return;
+    }
+    setCountImportFileLabel(`${file.name} (${formatFileSize(file.size)})`);
     const reader = new FileReader();
     reader.onload = () => setCsvText(String(reader.result || ""));
     reader.readAsText(file);
   }
 
-  function onImportAccountingFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  function onImportAccountingFile(file: File | null) {
+    if (!file) {
+      setAccountingImportFileLabel("ยังไม่ได้เลือกไฟล์");
+      return;
+    }
+    setAccountingImportFileLabel(`${file.name} (${formatFileSize(file.size)})`);
     const reader = new FileReader();
     reader.onload = () => setAccountingCsvText(String(reader.result || ""));
     reader.readAsText(file);
@@ -252,37 +299,68 @@ export default function StocktakePageView() {
   function onUseScannedQr() {
     const parts = qrScanValue.trim().split("|");
     if (parts.length !== 5 || parts[0] !== "QR") {
-      notify("Invalid QR format. Expected QR|TYPE|PLANT|YEAR|ASSET_NO");
+      notify("Invalid QR format. Expected QR|TYPE|PLANT|YEAR|ASSET_NO", "error");
       return;
     }
     const scannedAssetNo = parts[4]?.trim();
     if (!scannedAssetNo) {
-      notify("QR does not contain asset no");
+      notify("QR does not contain asset no", "error");
       return;
     }
     const asset = allAssets.find((x) => x.AssetNo === scannedAssetNo);
     if (!asset) {
-      notify("Asset from QR is not found in mock asset master");
+      notify("Asset from QR is not found in mock asset master", "error");
       return;
     }
     setCountMethod("QR");
     setAssetNo(asset.AssetNo);
     setCountCostCenter(asset.CostCenterName || "");
-    notify(`Loaded asset ${asset.AssetNo} from scanned QR`);
+    notify(`Loaded asset ${asset.AssetNo} from scanned QR`, "success");
   }
 
   return (
     <>
+      {popup ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/45 p-4">
+          <div className="w-full max-w-xl rounded-2xl border border-[#cfe0f0] bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.28)]">
+            <div className="mb-2.5 flex items-center justify-between gap-3">
+              <h3
+                className={
+                  popup.level === "error"
+                    ? "text-lg font-semibold text-[#b42318]"
+                    : popup.level === "success"
+                      ? "text-lg font-semibold text-[#0f7a45]"
+                      : "text-lg font-semibold text-[#123257]"
+                }
+              >
+                {popup.title}
+              </h3>
+              <button
+                className="button button--ghost"
+                type="button"
+                onClick={() => setPopup(null)}
+              >
+                ปิด
+              </button>
+            </div>
+            <p className="whitespace-pre-wrap text-[15px] text-[#123257]">{popup.message}</p>
+            <div className="mt-4 flex justify-end">
+              <button
+                className="button button--primary"
+                type="button"
+                onClick={() => setPopup(null)}
+              >
+                ตกลง
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <PageTitle
         title="การตรวจนับทรัพย์สิน"
         subtitle="QR Generation, รอบปี, บันทึกผลนับ, Import Excel และ Import สถานะทางบัญชี"
       />
-
-      {message ? (
-        <section className="panel">
-          <p className="muted">{message}</p>
-        </section>
-      ) : null}
 
       <section className="panel">
         <div className="kpi-grid">
@@ -344,7 +422,7 @@ export default function StocktakePageView() {
             type="button"
             onClick={() => {
               if (!qrValue || !qrImageUrl) {
-                notify("Please enter asset no before download QR");
+                notify("Please enter asset no before download QR", "error");
                 return;
               }
               const a = document.createElement("a");
@@ -388,9 +466,9 @@ export default function StocktakePageView() {
             onClick={() => {
               try {
                 markMockStocktakeReportGenerated(plantId, stocktakeYear);
-                notify("Marked report generated.");
+                notify("Marked report generated.", "success");
               } catch (error) {
-                notify((error as Error).message);
+                notify((error as Error).message, "error");
               }
             }}
           >
@@ -402,9 +480,9 @@ export default function StocktakePageView() {
             onClick={() => {
               try {
                 closeMockStocktakeYear(plantId, stocktakeYear, countedBy);
-                notify("Closed stocktake year.");
+                notify("Closed stocktake year.", "success");
               } catch (error) {
-                notify((error as Error).message);
+                notify((error as Error).message, "error");
               }
             }}
           >
@@ -416,9 +494,9 @@ export default function StocktakePageView() {
             onClick={() => {
               try {
                 const carried = carryPendingToNextMockYear(plantId, stocktakeYear, stocktakeYear + 1, countedBy);
-                notify(`Opened ${stocktakeYear + 1} and carried ${carried} pending record(s).`);
+                notify(`Opened ${stocktakeYear + 1} and carried ${carried} pending record(s).`, "success");
               } catch (error) {
-                notify((error as Error).message);
+                notify((error as Error).message, "error");
               }
             }}
           >
@@ -498,27 +576,49 @@ export default function StocktakePageView() {
 
       <section className="panel">
         <h3 className="mb-2.5">4) Import Count from Excel (CSV)</h3>
-        <div className="field">
-          <label>Upload file (.csv)</label>
-          <input type="file" accept=".csv,.txt" onChange={onImportCsvFile} />
-        </div>
+        <UploadFileControl
+          id="stocktake-count-import-file"
+          label="Upload file (.csv)"
+          fileLabel={countImportFileLabel}
+          accept=".csv,.txt"
+          buttonText="เลือกไฟล์"
+          helperText="รูปแบบที่รองรับ: assetNo,statusCode,note,method,qty"
+          onFileChange={(file) => onImportCsvFile(file)}
+        />
         <div className="field mt-2.5">
           <label>CSV: assetNo,statusCode,note,method,qty</label>
           <textarea value={csvText} onChange={(e) => setCsvText(e.target.value)} />
         </div>
-        <div className="mt-3">
+        <div className="chip-list mt-3">
           <button className="button button--ghost" type="button" onClick={onImportCsv}>
             Import Count CSV
+          </button>
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={() =>
+              downloadTextFile(
+                "stocktake-count-template.csv",
+                "assetNo,statusCode,note,method,qty\n100-001-2020,COUNTED,checked,EXCEL,1\n100-017-2019,PENDING,recheck tomorrow,MANUAL,1",
+              )
+            }
+          >
+            Download Template
           </button>
         </div>
       </section>
 
       <section className="panel">
         <h3 className="mb-2.5">5) Import Accounting Status (SUBMIT/APPROVED/REJECT)</h3>
-        <div className="field">
-          <label>Upload accounting file (.csv)</label>
-          <input type="file" accept=".csv,.txt" onChange={onImportAccountingFile} />
-        </div>
+        <UploadFileControl
+          id="stocktake-accounting-import-file"
+          label="Upload accounting file (.csv)"
+          fileLabel={accountingImportFileLabel}
+          accept=".csv,.txt"
+          buttonText="เลือกไฟล์"
+          helperText="เลือกไฟล์แล้วระบบจะเติมข้อมูลลงช่อง CSV ด้านล่างอัตโนมัติ"
+          onFileChange={(file) => onImportAccountingFile(file)}
+        />
         <div className="field mt-2.5">
           <label>CSV: assetNo,accountingStatusCode</label>
           <textarea value={accountingCsvText} onChange={(e) => setAccountingCsvText(e.target.value)} />
@@ -566,7 +666,7 @@ export default function StocktakePageView() {
                 email: participantEmail.trim(),
               });
               setParticipantEmail("");
-              notify("Added participant.");
+              notify("Added participant.", "success");
             }}
           >
             Add Participant
@@ -582,7 +682,7 @@ export default function StocktakePageView() {
                 fileName: meetingDocName.trim(),
               });
               setMeetingDocName("");
-              notify("Added meeting document.");
+              notify("Added meeting document.", "success");
             }}
           >
             Add Meeting Doc
@@ -608,7 +708,7 @@ export default function StocktakePageView() {
                       type="button"
                       onClick={() => {
                         removeMockStocktakeParticipant(participant.StocktakeParticipantId);
-                        notify("Removed participant.");
+                        notify("Removed participant.", "success");
                       }}
                     >
                       Remove

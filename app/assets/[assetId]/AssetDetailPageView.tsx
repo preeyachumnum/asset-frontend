@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { PageTitle } from "@/components/page-title";
+import { UploadFileControl } from "@/components/upload-file-control";
 import { ApiError, getAssetDetail, toApiFileUrl, uploadAssetImage } from "@/lib/asset-api";
 import { formatDate, formatMoney } from "@/lib/format";
 import { clearSession, readSession, useHydrated, useSession } from "@/lib/session";
@@ -114,11 +115,6 @@ export default function AssetDetailPageView() {
     }
   }
 
-  function onChangeFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files && event.target.files[0];
-    setSelectedFile(file || null);
-  }
-
   const asset = detail.asset;
   const images = detail.images;
   const selectedFileLabel = selectedFile
@@ -202,60 +198,38 @@ export default function AssetDetailPageView() {
 
       {!loading && asset ? (
         <section className="panel">
-          <div className="mb-3">
+          <div className="mb-4">
             <h3 className="text-base font-semibold text-[#1f4f78]">อัปโหลดรูปภาพ</h3>
-            <p className="muted mt-1 text-sm">
-              Primary image คือรูปหลักที่แสดงเป็นรูปแรกของทรัพย์สิน
-            </p>
+            <p className="muted mt-1 text-sm">Primary image คือรูปหลักที่แสดงเป็นรูปแรกของทรัพย์สิน</p>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px_auto] lg:items-end">
-            <div className="rounded-xl border border-[#d4e2f0] bg-[#f8fbff] p-3">
-              <label
-                htmlFor="asset-image"
-                className="mb-2 block text-sm font-semibold text-[#355b7f]"
-              >
-                เลือกไฟล์รูป
-              </label>
-              <input
-                id="asset-image"
-                className="sr-only"
-                type="file"
-                accept="image/*"
-                onChange={onChangeFile}
-              />
-              <div className="flex flex-wrap items-center gap-2">
-                <label
-                  htmlFor="asset-image"
-                  className="inline-flex cursor-pointer items-center rounded-lg border border-[#8fb4d7] bg-white px-3 py-2 text-sm font-semibold text-[#1f517a] transition hover:border-[#5f95c8] hover:bg-[#edf5ff]"
-                >
-                  เลือกไฟล์
-                </label>
-                <span className="max-w-full truncate text-sm text-[#315271]">
-                  {selectedFileLabel}
-                </span>
-              </div>
-            </div>
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_260px_auto] lg:items-center">
+            <UploadFileControl
+              id="asset-image"
+              label="เลือกไฟล์รูป"
+              fileLabel={selectedFileLabel}
+              accept="image/*"
+              buttonText="เลือกไฟล์"
+              helperText="รองรับไฟล์ JPG, PNG, WEBP"
+              onFileChange={(file) => {
+                setSelectedFile(file);
+                setUploadMessage("");
+              }}
+            />
 
-            <label className="flex h-11 cursor-pointer items-center justify-between rounded-xl border border-[#d4e2f0] bg-white px-3">
-              <span className="text-sm font-semibold text-[#2f5476]">ตั้งเป็นรูปหลัก</span>
+            <label className="inline-flex cursor-pointer items-center rounded-xl border border-[#d4e2f0] bg-white px-3 py-3">
               <input
                 checked={isPrimary}
                 onChange={(event) => setIsPrimary(event.target.checked)}
                 type="checkbox"
-                className="sr-only"
+                className="peer sr-only"
               />
-              <span
-                className={`relative inline-flex h-6 w-11 rounded-full transition ${
-                  isPrimary ? "bg-[#1d74b7]" : "bg-[#c9d9e8]"
-                }`}
-              >
+              <div className="relative h-6 w-11 rounded-full bg-[#c9d9e8] transition peer-checked:bg-[#1d74b7] peer-focus:ring-2 peer-focus:ring-[#6aa3d340]">
                 <span
-                  className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition ${
-                    isPrimary ? "left-6" : "left-1"
-                  }`}
+                  className="absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5"
                 />
-              </span>
+              </div>
+              <span className="ml-3 text-sm font-semibold text-[#2f5476]">ตั้งเป็นรูปหลัก</span>
             </label>
 
             <button

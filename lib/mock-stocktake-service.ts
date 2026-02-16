@@ -267,30 +267,95 @@ export function listMockStocktakeAssetByCostCenter(
   return getMockAssetOptions().filter((x) => x.CostCenterName === costCenterName);
 }
 
+const COUNT_CSV_TEMPLATE = "assetNo,statusCode,note,method,qty";
+const COUNT_METHODS = new Set<StocktakeRecordView["CountMethod"]>(["QR", "MANUAL", "EXCEL"]);
+
+function normalizeHeaderToken(value: string) {
+  return value
+    .replace(/^\uFEFF/, "")
+    .replace(/^["']|["']$/g, "")
+    .toLowerCase()
+    .replace(/[\s_.-]+/g, "");
+}
+
+function looksLikeHeaderRow(columns: string[]) {
+  const c1 = normalizeHeaderToken(columns[0] || "");
+  const c2 = normalizeHeaderToken(columns[1] || "");
+  const firstIsHeader = c1 === "assetno" || c1 === "assetnumber" || c1 === "asset";
+  const secondIsHeader = c2 === "statuscode" || c2 === "status";
+  return firstIsHeader || secondIsHeader;
+}
+
+function looksLikeSapPipeFile(lines: string[]) {
+  const sample = lines.slice(0, 5);
+  if (!sample.length) return false;
+  const pipeLikeRows = sample.filter((line) => (line.match(/\|/g) || []).length >= 4).length;
+  return pipeLikeRows >= Math.ceil(sample.length / 2);
+}
+
 export function importMockStocktakeCsv(input: {
   plantId: string;
   stocktakeYear: number;
   csvText: string;
   countedByName: string;
 }) {
-  const lines = input.csvText.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  const lines = input.csvText
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  if (!lines.length) {
+    return { imported: 0, errors: ["CSV is empty"] };
+  }
+
+  if (looksLikeSapPipeFile(lines)) {
+    return {
+      imported: 0,
+      errors: [
+        `Unsupported file format for Count import. This looks like SAP master file. Use template: ${COUNT_CSV_TEMPLATE}`,
+      ],
+    };
+  }
+
+  const store = readStore();
+  const config = getYearConfig(store, input.plantId, input.stocktakeYear);
+  if (!config) throw new Error("Year config not found");
+  if (!config.IsOpen) {
+    return {
+      imported: 0,
+      errors: [`Stocktake year ${input.stocktakeYear} is closed. Please switch/open year before import.`],
+    };
+  }
+
+  const firstColumns = lines[0].split(",").map((x) => x.trim());
+  const hasHeader = looksLikeHeaderRow(firstColumns);
   let imported = 0;
   const errors: string[] = [];
 
   lines.forEach((line, index) => {
-    const [assetNo, statusCodeRaw, note = "", countMethodRaw = "EXCEL", qtyRaw = "1"] = line
+    if (hasHeader && index === 0) return;
+
+    const lineNo = index + 1;
+    const [assetNoRaw, statusCodeRaw, note = "", countMethodRaw = "EXCEL", qtyRaw = "1"] = line
       .split(",")
-      .map((x) => x.trim());
+      .map((x) => x.trim().replace(/^["']|["']$/g, ""));
+
+    const assetNo = assetNoRaw || "";
 
     const statusCode = (statusCodeRaw || "COUNTED").toUpperCase();
     if (!assetNo) {
-      errors.push(`Line ${index + 1}: missing assetNo`);
+      errors.push(`Line ${lineNo}: missing assetNo`);
       return;
     }
     if (!stocktakeStatuses.includes(statusCode)) {
-      errors.push(`Line ${index + 1}: invalid statusCode ${statusCode}`);
+      errors.push(
+        `Line ${lineNo}: invalid statusCode ${statusCode} (allowed: ${stocktakeStatuses.join("/")})`,
+      );
       return;
     }
+
+    const methodCandidate = (countMethodRaw || "EXCEL").toUpperCase() as StocktakeRecordView["CountMethod"];
+    const countMethod = COUNT_METHODS.has(methodCandidate) ? methodCandidate : "EXCEL";
 
     try {
       upsertMockStocktakeRecord({
@@ -298,14 +363,14 @@ export function importMockStocktakeCsv(input: {
         stocktakeYear: input.stocktakeYear,
         assetNo,
         statusCode: statusCode as StocktakeRecordView["StatusCode"],
-        countMethod: (countMethodRaw.toUpperCase() as StocktakeRecordView["CountMethod"]) || "EXCEL",
+        countMethod,
         countQty: Math.max(1, Number(qtyRaw) || 1),
         noteText: note,
         countedByName: input.countedByName,
       });
       imported += 1;
     } catch (error) {
-      errors.push(`Line ${index + 1}: ${(error as Error).message}`);
+      errors.push(`Line ${lineNo}: ${(error as Error).message}`);
     }
   });
 
