@@ -18,6 +18,8 @@ function readRequests() {
     ...row,
     ToOwnerName: row.ToOwnerName || "Unknown Receiver",
     ToOwnerEmail: row.ToOwnerEmail || "asset.receiver@mitrphol.com",
+    ReasonText: row.ReasonText || "",
+    Attachments: row.Attachments || [],
   }));
 }
 
@@ -39,11 +41,11 @@ function nextRequestNo(rows: TransferRequestDetail[]) {
 
 function buildApproval(): ApprovalState {
   const steps = [
-    "Head of Source Department",
-    "Manager of Source Department",
-    "Head of Destination Department",
-    "Manager of Destination Department",
-    "Director of Destination Department",
+    "หัวหน้าแผนกผู้ขอโอน",
+    "ผู้จัดการฝ่ายผู้ขอโอน",
+    "หัวหน้าแผนกรับโอน",
+    "ผู้จัดการฝ่ายรับโอน",
+    "ผอ.สายงานผู้รับโอน",
   ];
   return {
     FlowCode: "TRANSFER",
@@ -88,6 +90,7 @@ function toSummary(request: TransferRequestDetail): TransferRequestSummary {
     ToCostCenter: request.ToCostCenter,
     ToOwnerName: request.ToOwnerName || "-",
     ToOwnerEmail: request.ToOwnerEmail || "-",
+    ReasonText: request.ReasonText || "",
     CurrentApprover: currentApprover,
   };
 }
@@ -112,8 +115,15 @@ export function createMockTransferDraft(input: {
   toLocation: string;
   toOwnerName: string;
   toOwnerEmail: string;
+  reasonText: string;
   createdByName: string;
 }) {
+  if (!String(input.fromCostCenter || "").trim()) throw new Error("From cost center is required");
+  if (!String(input.toCostCenter || "").trim()) throw new Error("To cost center is required");
+  if (input.fromCostCenter.trim() === input.toCostCenter.trim()) {
+    throw new Error("Destination cost center must be different from source");
+  }
+
   const rows = readRequests();
   const request: TransferRequestDetail = {
     TransferRequestId: uid(),
@@ -125,10 +135,12 @@ export function createMockTransferDraft(input: {
     ToLocation: input.toLocation,
     ToOwnerName: input.toOwnerName || "Unknown Receiver",
     ToOwnerEmail: input.toOwnerEmail || "asset.receiver@mitrphol.com",
+    ReasonText: input.reasonText || "",
     CreatedByName: input.createdByName,
     CreatedAt: nowIso(),
     Status: "DRAFT",
     TotalBookValue: 0,
+    Attachments: [],
     Items: [],
     ApprovalHistory: [],
   };
@@ -171,6 +183,8 @@ export function submitMockTransfer(requestId: string) {
   if (!request) throw new Error("Transfer request not found");
   if (request.Status !== "DRAFT") throw new Error("Only DRAFT can be submitted");
   if (!request.Items.length) throw new Error("Please add at least one item");
+  if (!String(request.ReasonText || "").trim()) throw new Error("Transfer reason is required");
+  if (!request.Attachments.length) throw new Error("Please attach at least one supporting file");
 
   request.Approval = buildApproval();
   request.Status = "SUBMITTED";
@@ -222,4 +236,69 @@ export function actionMockTransferApproval(
 
 export function transferStatusOptions(): Array<RequestStatus | "ALL"> {
   return ["ALL", "DRAFT", "SUBMITTED", "PENDING", "APPROVED", "REJECTED"];
+}
+
+export function updateMockTransferDraftMeta(
+  requestId: string,
+  patch: {
+    toCostCenter?: string;
+    toLocation?: string;
+    toOwnerName?: string;
+    toOwnerEmail?: string;
+    reasonText?: string;
+  },
+) {
+  const rows = readRequests();
+  const request = rows.find((x) => x.TransferRequestId === requestId);
+  if (!request) throw new Error("Transfer request not found");
+  if (request.Status !== "DRAFT") throw new Error("Edit is allowed only in DRAFT");
+
+  if (typeof patch.toCostCenter === "string") {
+    const toCc = patch.toCostCenter.trim();
+    if (!toCc) throw new Error("To cost center is required");
+    if (toCc === request.FromCostCenter) {
+      throw new Error("Destination cost center must be different from source");
+    }
+    request.ToCostCenter = toCc;
+  }
+  if (typeof patch.toLocation === "string") request.ToLocation = patch.toLocation.trim();
+  if (typeof patch.toOwnerName === "string") request.ToOwnerName = patch.toOwnerName.trim() || request.ToOwnerName;
+  if (typeof patch.toOwnerEmail === "string") request.ToOwnerEmail = patch.toOwnerEmail.trim() || request.ToOwnerEmail;
+  if (typeof patch.reasonText === "string") request.ReasonText = patch.reasonText.trim();
+  saveRequests(rows);
+  return request;
+}
+
+export function addMockTransferAttachment(requestId: string, fileName: string) {
+  const rows = readRequests();
+  const request = rows.find((x) => x.TransferRequestId === requestId);
+  if (!request) throw new Error("Transfer request not found");
+  if (request.Status !== "DRAFT") throw new Error("Attach file only in DRAFT");
+  const name = String(fileName || "").trim();
+  if (!name) throw new Error("Attachment name is required");
+  request.Attachments = Array.from(new Set([...(request.Attachments || []), name]));
+  saveRequests(rows);
+  return request.Attachments;
+}
+
+export function removeMockTransferAttachment(requestId: string, fileName: string) {
+  const rows = readRequests();
+  const request = rows.find((x) => x.TransferRequestId === requestId);
+  if (!request) throw new Error("Transfer request not found");
+  if (request.Status !== "DRAFT") throw new Error("Remove attachment only in DRAFT");
+  request.Attachments = (request.Attachments || []).filter((x) => x !== fileName);
+  saveRequests(rows);
+  return request.Attachments;
+}
+
+export function removeMockTransferItem(requestId: string, itemId: string) {
+  const rows = readRequests();
+  const request = rows.find((x) => x.TransferRequestId === requestId);
+  if (!request) throw new Error("Transfer request not found");
+  if (request.Status !== "DRAFT") throw new Error("Remove item only in DRAFT");
+  request.Items = request.Items.filter((x) => x.TransferRequestItemId !== itemId);
+  request.TotalBookValue = Number(
+    request.Items.reduce((sum, x) => sum + x.BookValueAtRequest, 0).toFixed(2),
+  );
+  saveRequests(rows);
 }

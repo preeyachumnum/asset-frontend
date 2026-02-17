@@ -154,6 +154,7 @@ export interface TransferRequestSummary {
   ToCostCenter: string;
   ToOwnerName: string;
   ToOwnerEmail: string;
+  ReasonText: string;
   CurrentApprover?: string;
 }
 
@@ -252,6 +253,9 @@ export interface DemolishItem {
   BookValueAtRequest: number;
   Note?: string;
   Images: string[];
+  HasExistingImage?: boolean;
+  RequiresExpertReview?: boolean;
+  ExpertName?: string;
 }
 
 export interface DemolishDocument {
@@ -296,10 +300,12 @@ export interface TransferRequestDetail {
   ToLocation: string;
   ToOwnerName: string;
   ToOwnerEmail: string;
+  ReasonText: string;
   CreatedByName: string;
   CreatedAt: string;
   Status: RequestStatus;
   TotalBookValue: number;
+  Attachments: string[];
   Items: TransferItem[];
   Approval?: ApprovalState;
   ApprovalHistory: ApprovalHistoryItem[];
