@@ -75,7 +75,8 @@ export default function DemolishPageView() {
   const session = useSession();
   const hydrated = useHydrated();
 
-  const [rows, setRows] = useState<DemolishRequestSummary[]>(() => listMockDemolishRequests());
+  const [rows, setRows] = useState<DemolishRequestSummary[]>([]);
+  const [rowsLoaded, setRowsLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [status, setStatus] = useState<RequestStatus | "ALL">("ALL");
   const [search, setSearch] = useState("");
@@ -105,6 +106,13 @@ export default function DemolishPageView() {
   const [approvalComment, setApprovalComment] = useState("");
 
   const refresh = () => setRows(listMockDemolishRequests());
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (rowsLoaded) return;
+    setRows(listMockDemolishRequests());
+    setRowsLoaded(true);
+  }, [hydrated, rowsLoaded]);
 
   const effectiveSessionId = useMemo(() => {
     if (!hydrated) return "";
@@ -145,16 +153,19 @@ export default function DemolishPageView() {
   const canApproveReject = selected ? ["SUBMITTED", "PENDING"].includes(selected.Status) : false;
   const canReceive = selected?.Status === "APPROVED";
   const suggestedFlow = (selected?.TotalBookValue || 0) <= 1 ? "DEMOLISH_LE_1" : "DEMOLISH_GT_1";
+  const EMPTY_HINT_MAP: Record<string, boolean> = useMemo(() => ({}), []);
 
   useEffect(() => {
-    if (!selected || !isDraft || !effectiveSessionId) {
-      setItemImageHintMap({});
+    const currentSelected = selectedId ? getMockDemolishDetail(selectedId) : null;
+    const currentIsDraft = currentSelected?.Status === "DRAFT";
+    if (!currentSelected || !currentIsDraft || !effectiveSessionId) {
+      setItemImageHintMap(EMPTY_HINT_MAP);
       return;
     }
 
-    const pendingItems = selected.Items.filter((x) => !x.Images.length && !x.HasExistingImage);
+    const pendingItems = currentSelected.Items.filter((x) => !x.Images.length && !x.HasExistingImage);
     if (!pendingItems.length) {
-      setItemImageHintMap({});
+      setItemImageHintMap(EMPTY_HINT_MAP);
       return;
     }
 
@@ -192,7 +203,7 @@ export default function DemolishPageView() {
     return () => {
       cancelled = true;
     };
-  }, [effectiveSessionId, isDraft, selected]);
+  }, [EMPTY_HINT_MAP, effectiveSessionId, rows, selectedId]);
 
   useEffect(() => {
     if (!hydrated || !isDraft) return;
