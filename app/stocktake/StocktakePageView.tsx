@@ -1,71 +1,48 @@
-﻿"use client";
+"use client";
 
-import { FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import Image from "next/image";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { PageTitle } from "@/components/page-title";
 import { StatusChip } from "@/components/status-chip";
 import { UploadFileControl } from "@/components/upload-file-control";
-import { formatDate, formatMoney } from "@/lib/format";
-import { getMockAssetOptions } from "@/lib/mock-assets-service";
 import {
-  addMockStocktakeMeetingDoc,
-  addMockStocktakeParticipant,
-  carryPendingToNextMockYear,
-  closeMockStocktakeYear,
-  getMockStocktakeThreeTabs,
-  getMockStocktakeWorkspace,
-  getOrCreateMockStocktakeYearConfig,
-  importMockStocktakeAccountingStatuses,
-  importMockStocktakeCsv,
-  listMockStocktakeAssetByCostCenter,
-  markMockStocktakeReportGenerated,
-  removeMockStocktakeParticipant,
-  upsertMockStocktakeRecord,
-} from "@/lib/mock-stocktake-service";
-import type { StocktakeRecordView } from "@/lib/types";
+  ApiError,
+  closeStocktakeYear,
+  getAssets,
+  getStocktakeWorkspace,
+  importStocktakeCounts,
+  openNextStocktakeYear,
+  scanStocktakeAsset,
+} from "@/lib/asset-api";
+import { formatDate, formatMoney } from "@/lib/format";
+import { clearSession, readSession, useHydrated, useSession } from "@/lib/session";
+import type { AssetRow, StocktakeWorkspaceData } from "@/lib/types";
 
-const statusOptions: StocktakeRecordView["StatusCode"][] = [
-  "COUNTED",
-  "NOT_COUNTED",
-  "PENDING",
-  "REJECTED",
-  "OTHER",
-];
+type NoticeTone = "success" | "error" | "info";
 
-const EMPTY_WORKSPACE: ReturnType<typeof getMockStocktakeWorkspace> = {
-  config: null,
-  records: [],
-  participants: [],
-  meetingDocs: [],
-  summary: [],
-  accountingSummary: [],
-};
-
-const EMPTY_TABS: ReturnType<typeof getMockStocktakeThreeTabs> = {
-  counted: [],
-  notCounted: [],
-  rejected: [],
-};
-
-const subscribeHydration = () => () => {};
-
-type PopupLevel = "info" | "success" | "error";
-type PopupState = {
-  title: string;
-  message: string;
-  level: PopupLevel;
+type Notice = {
+  tone: NoticeTone;
+  text: string;
 } | null;
 
-function downloadTextFile(fileName: string, text: string) {
-  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  link.click();
-  URL.revokeObjectURL(url);
-}
+type CountMethod = "QR" | "BARCODE" | "MANUAL" | "EXCEL";
+
+const DEFAULT_STATUS_CODES = ["COUNTED", "NOT_COUNTED", "OTHER", "PENDING"];
+
+const STATUS_LABELS: Record<string, string> = {
+  COUNTED: "Normal",
+  ACTIVE: "Normal",
+  NORMAL: "Normal",
+  NOT_COUNTED: "Not Found",
+  NOT_FOUND: "Not Found",
+  LOST: "Not Found",
+  DAMAGED: "Damaged",
+  OTHER: "Damaged",
+  REJECTED: "Damaged",
+  PENDING_DEMOLISH: "Pending Demolish",
+  PENDING: "Pending Demolish",
+};
 
 function formatFileSize(size: number) {
   if (!Number.isFinite(size) || size <= 0) return "-";
@@ -74,651 +51,602 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-function formatImportResultMessage(title: string, imported: number, errors: string[]) {
-  if (!errors.length) return `${title}: imported ${imported} rows.`;
-  const preview = errors.slice(0, 5).join(" | ");
-  const more = errors.length > 5 ? ` | ...(+${errors.length - 5} more)` : "";
-  return `${title}: imported ${imported} rows, ${errors.length} error(s). ${preview}${more}`;
+function normalizeAssetNo(value: string) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+}
+
+function statusLabel(code: string) {
+  return STATUS_LABELS[String(code || "").toUpperCase()] || code;
+}
+
+function pickPrimaryStatuses(available: Set<string>) {
+  const groups = [
+    { aliases: ["COUNTED", "ACTIVE", "NORMAL"], fallback: "COUNTED" },
+    { aliases: ["NOT_COUNTED", "NOT_FOUND", "LOST"], fallback: "NOT_COUNTED" },
+    { aliases: ["DAMAGED", "OTHER", "REJECTED"], fallback: "OTHER" },
+    { aliases: ["PENDING_DEMOLISH", "PENDING"], fallback: "PENDING" },
+  ];
+
+  const selected: string[] = [];
+  groups.forEach((group) => {
+    const found = group.aliases.find((code) => available.has(code));
+    selected.push(found || group.fallback);
+  });
+
+  return selected;
+}
+
+function parseScanValue(value: string): { assetNo: string; method: CountMethod } | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  if (!raw.includes("|")) {
+    return { assetNo: raw, method: "BARCODE" };
+  }
+
+  const parts = raw
+    .split("|")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (!parts.length) return null;
+
+  const prefix = parts[0].toUpperCase();
+  if (prefix === "QR") {
+    const assetNo = parts[4] || parts[parts.length - 1] || "";
+    if (!assetNo) return null;
+    return { assetNo, method: "QR" };
+  }
+
+  if (prefix === "BARCODE" || prefix === "BAR" || prefix === "BC") {
+    const assetNo = parts[parts.length - 1] || "";
+    if (!assetNo) return null;
+    return { assetNo, method: "BARCODE" };
+  }
+
+  const assetNo = parts[parts.length - 1] || "";
+  if (!assetNo) return null;
+  return { assetNo, method: "BARCODE" };
+}
+
+function noticeClassName(tone: NoticeTone) {
+  if (tone === "error") return "rounded-xl border border-[#efcaca] bg-[#fff2f2] px-3 py-2 text-sm text-[#8b1d1d]";
+  if (tone === "success") return "rounded-xl border border-[#cdebdc] bg-[#f0fff7] px-3 py-2 text-sm text-[#0f5a35]";
+  return "rounded-xl border border-[#c9dff3] bg-[#f7fbff] px-3 py-2 text-sm text-[#234a70]";
 }
 
 export default function StocktakePageView() {
+  const router = useRouter();
+  const hydrated = useHydrated();
+  const session = useSession();
+
   const currentYear = new Date().getUTCFullYear();
-  const [plantId, setPlantId] = useState("Plant-KLS");
-  const [stocktakeYear, setStocktakeYear] = useState(currentYear);
+  const [year, setYear] = useState(currentYear);
+  const [filterStatusCode, setFilterStatusCode] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [popup, setPopup] = useState<PopupState>(null);
 
-  const [countCostCenter, setCountCostCenter] = useState("");
-  const [assetNo, setAssetNo] = useState("");
-  const [statusCode, setStatusCode] = useState<StocktakeRecordView["StatusCode"]>("COUNTED");
-  const [countMethod, setCountMethod] = useState<StocktakeRecordView["CountMethod"]>("QR");
-  const [countQty, setCountQty] = useState(1);
+  const [workspace, setWorkspace] = useState<StocktakeWorkspaceData | null>(null);
+  const [loadingWorkspace, setLoadingWorkspace] = useState(false);
+
+  const [assetSearch, setAssetSearch] = useState("");
+  const [assetRows, setAssetRows] = useState<AssetRow[]>([]);
+  const [assetLoading, setAssetLoading] = useState(false);
+  const [selectedAssetId, setSelectedAssetId] = useState("");
+  const [scanValue, setScanValue] = useState("");
+
+  const [scanStatusCode, setScanStatusCode] = useState("COUNTED");
+  const [countMethod, setCountMethod] = useState<CountMethod>("QR");
   const [noteText, setNoteText] = useState("");
-  const [countedBy, setCountedBy] = useState("asset.accounting@mitrphol.com");
-  const [imageNames, setImageNames] = useState("");
-  const [csvText, setCsvText] = useState("");
-  const [accountingCsvText, setAccountingCsvText] = useState("");
-  const [countImportFileLabel, setCountImportFileLabel] = useState("ยังไม่ได้เลือกไฟล์");
-  const [accountingImportFileLabel, setAccountingImportFileLabel] = useState("ยังไม่ได้เลือกไฟล์");
+  const [scanImageFile, setScanImageFile] = useState<File | null>(null);
+  const [scanBusy, setScanBusy] = useState(false);
 
-  const [participantEmail, setParticipantEmail] = useState("");
-  const [meetingDocName, setMeetingDocName] = useState("");
-  const [qrType, setQrType] = useState("STICKER");
-  const [qrAssetNo, setQrAssetNo] = useState("");
-  const [qrScanValue, setQrScanValue] = useState("");
-  const [qrImageUrl, setQrImageUrl] = useState("");
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importMethod, setImportMethod] = useState<CountMethod>("EXCEL");
+  const [importBusy, setImportBusy] = useState(false);
 
-  const hydrated = useSyncExternalStore(
-    subscribeHydration,
-    () => true,
-    () => false,
-  );
+  const [yearBusy, setYearBusy] = useState(false);
 
-  const workspace = hydrated
-    ? (() => {
-        getOrCreateMockStocktakeYearConfig(plantId, stocktakeYear);
-        return getMockStocktakeWorkspace(plantId, stocktakeYear);
-      })()
-    : EMPTY_WORKSPACE;
+  const [workspaceNotice, setWorkspaceNotice] = useState<Notice>(null);
+  const [scanNotice, setScanNotice] = useState<Notice>(null);
+  const [importNotice, setImportNotice] = useState<Notice>(null);
 
-  const tabs = hydrated ? getMockStocktakeThreeTabs(plantId, stocktakeYear) : EMPTY_TABS;
-  const allAssets = useMemo(() => (hydrated ? getMockAssetOptions() : []), [hydrated]);
+  const effectiveSessionId = useMemo(() => {
+    if (!hydrated) return "";
+    const fromHook = String(session?.sessionId || "").trim();
+    if (fromHook) return fromHook;
+    return String(readSession()?.sessionId || "").trim();
+  }, [hydrated, session?.sessionId]);
 
-  const costCenters = useMemo(
-    () => Array.from(new Set(allAssets.map((x) => x.CostCenterName).filter(Boolean))).sort(),
-    [allAssets],
-  );
-
-  const assetsInCostCenter = useMemo(() => {
-    if (!countCostCenter) return [];
-    return listMockStocktakeAssetByCostCenter(plantId, stocktakeYear, countCostCenter);
-  }, [countCostCenter, plantId, stocktakeYear]);
-
-  useEffect(() => {
-    if (!costCenters.length) return;
-    if (!countCostCenter || !costCenters.includes(countCostCenter)) {
-      setCountCostCenter(costCenters[0]);
-    }
-  }, [costCenters, countCostCenter]);
-
-  useEffect(() => {
-    if (!assetsInCostCenter.length) {
-      setAssetNo("");
-      return;
-    }
-    if (!assetsInCostCenter.some((x) => x.AssetNo === assetNo)) {
-      setAssetNo(assetsInCostCenter[0].AssetNo);
-    }
-  }, [assetsInCostCenter, assetNo]);
-
-  const filteredRecords = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
-    return workspace.records.filter((row) => {
-      const byStatus = statusFilter === "ALL" || row.StatusCode === statusFilter;
-      const bySearch =
-        !keyword ||
-        [row.AssetNo, row.AssetName, row.CostCenterName, row.NoteText, row.AccountingStatusCode]
-          .join(" ")
-          .toLowerCase()
-          .includes(keyword);
-      return byStatus && bySearch;
+  const statusOptions = useMemo(() => {
+    const values = new Set<string>(DEFAULT_STATUS_CODES.map((x) => x.toUpperCase()));
+    (workspace?.summary || []).forEach((row) => {
+      if (row.StatusCode) values.add(row.StatusCode);
     });
-  }, [workspace.records, statusFilter, search]);
+    const primary = pickPrimaryStatuses(values);
+    const rest = Array.from(values).filter((code) => !primary.includes(code));
+    return [...primary, ...rest];
+  }, [workspace?.summary]);
 
-  const qrValue = useMemo(() => {
-    if (!qrAssetNo.trim()) return "";
-    return `QR|${qrType}|${plantId}|${stocktakeYear}|${qrAssetNo.trim()}`;
-  }, [qrAssetNo, qrType, plantId, stocktakeYear]);
+  const selectedAsset = useMemo(
+    () => assetRows.find((row) => row.AssetId === selectedAssetId) || null,
+    [assetRows, selectedAssetId],
+  );
 
   useEffect(() => {
-    let isMounted = true;
+    if (!statusOptions.includes(scanStatusCode)) {
+      setScanStatusCode(statusOptions[0] || "COUNTED");
+    }
+  }, [scanStatusCode, statusOptions]);
 
-    async function generateQr() {
-      if (!qrValue) {
-        if (isMounted) setQrImageUrl("");
+  useEffect(() => {
+    if (!hydrated) return;
+    if (effectiveSessionId) return;
+    clearSession();
+    router.replace("/login");
+  }, [effectiveSessionId, hydrated, router]);
+
+  const loadWorkspace = useCallback(async () => {
+    if (!effectiveSessionId) return;
+
+    setLoadingWorkspace(true);
+    try {
+      const data = await getStocktakeWorkspace(effectiveSessionId, {
+        year,
+        statusCode: filterStatusCode,
+        search,
+      });
+      setWorkspace(data);
+      setWorkspaceNotice(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        clearSession();
+        router.replace("/login");
         return;
       }
+      setWorkspaceNotice({
+        tone: "error",
+        text: error instanceof Error ? error.message : "Failed to load workspace",
+      });
+    } finally {
+      setLoadingWorkspace(false);
+    }
+  }, [effectiveSessionId, filterStatusCode, router, search, year]);
+
+  useEffect(() => {
+    if (!hydrated || !effectiveSessionId) return;
+    loadWorkspace();
+  }, [effectiveSessionId, hydrated, loadWorkspace]);
+
+  const loadAssets = useCallback(
+    async (keyword: string, autoPickExact = false) => {
+      if (!effectiveSessionId) return;
+
+      setAssetLoading(true);
       try {
-        const qrcode = await import("qrcode");
-        const url = await qrcode.toDataURL(qrValue, {
-          width: 260,
-          margin: 1,
-          errorCorrectionLevel: "M",
+        const response = await getAssets(effectiveSessionId, {
+          page: 1,
+          pageSize: 100,
+          search: keyword,
         });
-        if (isMounted) setQrImageUrl(url);
-      } catch {
-        if (isMounted) setQrImageUrl("");
+
+        const rows = response.rows || [];
+        setAssetRows(rows);
+
+        if (autoPickExact && keyword.trim()) {
+          const key = normalizeAssetNo(keyword);
+          const exact = rows.find((row) => normalizeAssetNo(row.AssetNo) === key);
+          if (exact) setSelectedAssetId(exact.AssetId);
+        }
+      } catch (error) {
+        setScanNotice({
+          tone: "error",
+          text: error instanceof Error ? error.message : "Failed to search assets",
+        });
+      } finally {
+        setAssetLoading(false);
       }
-    }
+    },
+    [effectiveSessionId],
+  );
 
-    generateQr();
-    return () => {
-      isMounted = false;
-    };
-  }, [qrValue]);
+  useEffect(() => {
+    if (!hydrated || !effectiveSessionId) return;
+    loadAssets("", false);
+  }, [effectiveSessionId, hydrated, loadAssets]);
 
-  function notify(text: string, level: PopupLevel = "info", title?: string) {
-    const popupTitle =
-      title ||
-      (level === "error" ? "เกิดข้อผิดพลาด" : level === "success" ? "สำเร็จ" : "แจ้งเตือน");
-    setPopup({
-      title: popupTitle,
-      message: text,
-      level,
-    });
-  }
-
-  function onSubmitCount(event: FormEvent<HTMLFormElement>) {
+  function onSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setSearch(searchInput.trim());
+  }
+
+  async function onScanSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!effectiveSessionId) return;
+
+    if (!selectedAssetId) {
+      setScanNotice({ tone: "error", text: "Please select asset." });
+      return;
+    }
+
+    if (!scanImageFile) {
+      setScanNotice({ tone: "error", text: "Please upload evidence image." });
+      return;
+    }
+
+    setScanBusy(true);
     try {
-      if (!assetNo.trim()) throw new Error("Please choose asset");
-      upsertMockStocktakeRecord({
-        plantId,
-        stocktakeYear,
-        assetNo: assetNo.trim(),
-        statusCode,
+      await scanStocktakeAsset(effectiveSessionId, {
+        year,
+        assetId: selectedAssetId,
+        statusCode: scanStatusCode,
         countMethod,
-        countQty: Math.max(1, Number(countQty) || 1),
         noteText,
-        countedByName: countedBy,
-        imageNames: imageNames
-          .split(",")
-          .map((x) => x.trim())
-          .filter(Boolean),
+        image: scanImageFile,
       });
+
       setNoteText("");
-      setImageNames("");
-      notify("Saved stocktake record.", "success");
+      setScanImageFile(null);
+      setScanNotice({ tone: "success", text: "Saved count result." });
+      await loadWorkspace();
     } catch (error) {
-      notify((error as Error).message, "error");
-    }
-  }
-
-  function onImportCsv() {
-    try {
-      const result = importMockStocktakeCsv({
-        plantId,
-        stocktakeYear,
-        csvText,
-        countedByName: countedBy,
+      setScanNotice({
+        tone: "error",
+        text: error instanceof Error ? error.message : "Failed to save count result",
       });
-      notify(
-        formatImportResultMessage("Import count CSV", result.imported, result.errors),
-        result.errors.length ? "error" : "success",
-      );
-      if (!result.errors.length) {
-        setCsvText("");
-      }
-    } catch (error) {
-      notify((error as Error).message, "error");
+    } finally {
+      setScanBusy(false);
     }
   }
 
-  function onImportAccountingCsv() {
+  async function onImportSubmit() {
+    if (!effectiveSessionId) return;
+
+    if (!importFile) {
+      setImportNotice({ tone: "error", text: "Please select file." });
+      return;
+    }
+
+    setImportBusy(true);
     try {
-      const result = importMockStocktakeAccountingStatuses({
-        plantId,
-        stocktakeYear,
-        csvText: accountingCsvText,
+      const response = await importStocktakeCounts(effectiveSessionId, {
+        year,
+        file: importFile,
+        countMethod: importMethod,
       });
-      notify(
-        formatImportResultMessage("Import accounting status", result.imported, result.errors),
-        result.errors.length ? "error" : "success",
-      );
-      if (!result.errors.length) {
-        setAccountingCsvText("");
-      }
+
+      setImportNotice({
+        tone: "success",
+        text: `Import complete: parsed ${response.parsedRows} / imported ${response.importedRows}`,
+      });
+      setImportFile(null);
+      await loadWorkspace();
     } catch (error) {
-      notify((error as Error).message, "error");
+      setImportNotice({
+        tone: "error",
+        text: error instanceof Error ? error.message : "Import failed",
+      });
+    } finally {
+      setImportBusy(false);
     }
   }
 
-  function onImportCsvFile(file: File | null) {
-    if (!file) {
-      setCountImportFileLabel("ยังไม่ได้เลือกไฟล์");
-      return;
+  async function onCloseYear() {
+    if (!effectiveSessionId) return;
+
+    setYearBusy(true);
+    try {
+      await closeStocktakeYear(effectiveSessionId, year);
+      setWorkspaceNotice({ tone: "success", text: `Year ${year} closed.` });
+      await loadWorkspace();
+    } catch (error) {
+      setWorkspaceNotice({
+        tone: "error",
+        text: error instanceof Error ? error.message : "Failed to close year",
+      });
+    } finally {
+      setYearBusy(false);
     }
-    setCountImportFileLabel(`${file.name} (${formatFileSize(file.size)})`);
-    const reader = new FileReader();
-    reader.onload = () => setCsvText(String(reader.result || ""));
-    reader.readAsText(file);
   }
 
-  function onImportAccountingFile(file: File | null) {
-    if (!file) {
-      setAccountingImportFileLabel("ยังไม่ได้เลือกไฟล์");
-      return;
+  async function onOpenNextYear() {
+    if (!effectiveSessionId) return;
+
+    setYearBusy(true);
+    try {
+      const response = await openNextStocktakeYear(effectiveSessionId, {
+        fromYear: year,
+        toYear: year + 1,
+      });
+      setYear(response.toYear);
+      setWorkspaceNotice({ tone: "success", text: `Year ${response.toYear} is ready with pending carry-over.` });
+    } catch (error) {
+      setWorkspaceNotice({
+        tone: "error",
+        text: error instanceof Error ? error.message : "Failed to open next year",
+      });
+    } finally {
+      setYearBusy(false);
     }
-    setAccountingImportFileLabel(`${file.name} (${formatFileSize(file.size)})`);
-    const reader = new FileReader();
-    reader.onload = () => setAccountingCsvText(String(reader.result || ""));
-    reader.readAsText(file);
   }
 
-  function onUseScannedQr() {
-    const parts = qrScanValue.trim().split("|");
-    if (parts.length !== 5 || parts[0] !== "QR") {
-      notify("Invalid QR format. Expected QR|TYPE|PLANT|YEAR|ASSET_NO", "error");
+  async function onUseScannedCode() {
+    const parsed = parseScanValue(scanValue);
+    if (!parsed) {
+      setScanNotice({ tone: "error", text: "Scan code format is invalid." });
       return;
     }
-    const scannedAssetNo = parts[4]?.trim();
-    if (!scannedAssetNo) {
-      notify("QR does not contain asset no", "error");
-      return;
-    }
-    const asset = allAssets.find((x) => x.AssetNo === scannedAssetNo);
-    if (!asset) {
-      notify("Asset from QR is not found in mock asset master", "error");
-      return;
-    }
-    setCountMethod("QR");
-    setAssetNo(asset.AssetNo);
-    setCountCostCenter(asset.CostCenterName || "");
-    notify(`Loaded asset ${asset.AssetNo} from scanned QR`, "success");
+
+    const assetNo = parsed.assetNo;
+
+    setAssetSearch(assetNo);
+    await loadAssets(assetNo, true);
+    setCountMethod(parsed.method);
+    setScanNotice({ tone: "info", text: `Loaded from scan: ${assetNo}` });
   }
+
+  const scanFileLabel = scanImageFile
+    ? `${scanImageFile.name} (${formatFileSize(scanImageFile.size)})`
+    : "No image selected";
+  const importFileLabel = importFile
+    ? `${importFile.name} (${formatFileSize(importFile.size)})`
+    : "No file selected";
 
   return (
     <>
-      {popup ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/45 p-4">
-          <div className="w-full max-w-xl rounded-2xl border border-[#cfe0f0] bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.28)]">
-            <div className="mb-2.5 flex items-center justify-between gap-3">
-              <h3
-                className={
-                  popup.level === "error"
-                    ? "text-lg font-semibold text-[#b42318]"
-                    : popup.level === "success"
-                      ? "text-lg font-semibold text-[#0f7a45]"
-                      : "text-lg font-semibold text-[#123257]"
-                }
-              >
-                {popup.title}
-              </h3>
-              <button
-                className="button button--ghost"
-                type="button"
-                onClick={() => setPopup(null)}
-              >
-                ปิด
-              </button>
-            </div>
-            <p className="whitespace-pre-wrap text-[15px] text-[#123257]">{popup.message}</p>
-            <div className="mt-4 flex justify-end">
-              <button
-                className="button button--primary"
-                type="button"
-                onClick={() => setPopup(null)}
-              >
-                ตกลง
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <PageTitle
-        title="การตรวจนับทรัพย์สิน"
-        subtitle="QR Generation, รอบปี, บันทึกผลนับ, Import Excel และ Import สถานะทางบัญชี"
-      />
+      <PageTitle title="Asset Inventory Count" subtitle="Setup -> Count -> Import -> Review" />
 
       <section className="panel">
-        <div className="kpi-grid">
-          <div className="kpi">
-            <h3>Plant</h3>
-            <p>{plantId}</p>
-          </div>
-          <div className="kpi">
-            <h3>Year</h3>
-            <p>{stocktakeYear}</p>
-          </div>
-          <div className="kpi">
-            <h3>Config</h3>
-            <p>{workspace.config?.IsOpen ? "OPEN" : "CLOSED"}</p>
-            <p className="muted mt-1">Report: {workspace.config?.ReportGeneratedAt ? "READY" : "MISSING"}</p>
-          </div>
-          <div className="kpi">
-            <h3>Records</h3>
-            <p>{workspace.records.length}</p>
-          </div>
-        </div>
-      </section>
+        <h3 className="mb-2.5">1) Setup Workspace</h3>
 
-      <section className="panel">
-        <h3 className="mb-2.5">1) Generate QR (Sticker/A4/A5)</h3>
-        <div className="form-grid">
+        <form className="form-grid" onSubmit={onSearchSubmit}>
           <div className="field">
-            <label>QR Type</label>
-            <select value={qrType} onChange={(e) => setQrType(e.target.value)}>
-              <option value="STICKER">QR Sticker</option>
-              <option value="LASER_A4">QR Laser A4</option>
-              <option value="LASER_A5">QR Laser A5</option>
+            <label>Year</label>
+            <input type="number" value={year} onChange={(event) => setYear(Number(event.target.value) || currentYear)} />
+          </div>
+
+          <div className="field">
+            <label>Status</label>
+            <select value={filterStatusCode} onChange={(event) => setFilterStatusCode(event.target.value)}>
+              <option value="">ALL</option>
+              {statusOptions.map((code) => (
+                <option key={code} value={code}>
+                  {statusLabel(code)}
+                </option>
+              ))}
             </select>
           </div>
+
           <div className="field">
-            <label>Asset No</label>
-            <input value={qrAssetNo} onChange={(e) => setQrAssetNo(e.target.value)} placeholder="100-001-2020" />
-          </div>
-          <div className="field">
-            <label>Generated QR Value</label>
-            <input value={qrValue || "-"} disabled />
-          </div>
-          <div className="field">
-            <label>Mobile Scan Payload (paste)</label>
+            <label>Search</label>
             <input
-              value={qrScanValue}
-              onChange={(e) => setQrScanValue(e.target.value)}
-              placeholder="QR|STICKER|Plant-KLS|2026|100-001-2020"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder="Asset No / Name"
             />
           </div>
-        </div>
+
+          <div className="field self-end">
+            <button className="button button--primary" type="submit" disabled={loadingWorkspace}>
+              {loadingWorkspace ? "Loading..." : "Load"}
+            </button>
+          </div>
+        </form>
 
         <div className="chip-list mt-3">
-          <button className="button button--ghost" type="button" onClick={onUseScannedQr}>
-            Use Scanned QR
-          </button>
-          <button
-            className="button button--ghost"
-            type="button"
-            onClick={() => {
-              if (!qrValue || !qrImageUrl) {
-                notify("Please enter asset no before download QR", "error");
-                return;
-              }
-              const a = document.createElement("a");
-              a.href = qrImageUrl;
-              a.download = `qr-${qrAssetNo || "asset"}-${qrType}.png`;
-              a.click();
-            }}
-          >
-            Download QR PNG
-          </button>
-        </div>
-
-        {qrImageUrl ? (
-          <div className="mt-3 rounded-xl border border-[#d8e6f4] bg-white p-3">
-            <Image src={qrImageUrl} alt={`QR ${qrValue}`} width={220} height={220} unoptimized />
-          </div>
-        ) : null}
-      </section>
-
-      <section className="panel">
-        <h3 className="mb-2.5">2) Year Config and Close/Open</h3>
-        <div className="form-grid">
-          <div className="field">
-            <label>Plant</label>
-            <input value={plantId} onChange={(e) => setPlantId(e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Stocktake Year</label>
-            <input type="number" value={stocktakeYear} onChange={(e) => setStocktakeYear(Number(e.target.value))} />
-          </div>
-          <div className="field">
-            <label>Actor</label>
-            <input value={countedBy} onChange={(e) => setCountedBy(e.target.value)} />
-          </div>
-        </div>
-
-        <div className="chip-list mt-3">
-          <button
-            className="button button--ghost"
-            type="button"
-            onClick={() => {
-              try {
-                markMockStocktakeReportGenerated(plantId, stocktakeYear);
-                notify("Marked report generated.", "success");
-              } catch (error) {
-                notify((error as Error).message, "error");
-              }
-            }}
-          >
-            Mark Report Generated
-          </button>
-          <button
-            className="button button--ghost"
-            type="button"
-            onClick={() => {
-              try {
-                closeMockStocktakeYear(plantId, stocktakeYear, countedBy);
-                notify("Closed stocktake year.", "success");
-              } catch (error) {
-                notify((error as Error).message, "error");
-              }
-            }}
-          >
+          <button className="button button--ghost" type="button" disabled={yearBusy} onClick={onCloseYear}>
             Close Year
           </button>
-          <button
-            className="button button--ghost"
-            type="button"
-            onClick={() => {
-              try {
-                const carried = carryPendingToNextMockYear(plantId, stocktakeYear, stocktakeYear + 1, countedBy);
-                notify(`Opened ${stocktakeYear + 1} and carried ${carried} pending record(s).`, "success");
-              } catch (error) {
-                notify((error as Error).message, "error");
-              }
-            }}
-          >
+          <button className="button button--ghost" type="button" disabled={yearBusy} onClick={onOpenNextYear}>
             Open Next Year + Carry Pending
           </button>
         </div>
+
+        {workspaceNotice ? <div className={`mt-3 ${noticeClassName(workspaceNotice.tone)}`}>{workspaceNotice.text}</div> : null}
+
+        <div className="kpi-grid mt-3">
+          <div className="kpi">
+            <h3>Stocktake ID</h3>
+            <p>{workspace?.stocktakeId || "-"}</p>
+          </div>
+          <div className="kpi">
+            <h3>Year Status</h3>
+            <p>{workspace?.config?.isOpen ? "OPEN" : "CLOSED"}</p>
+          </div>
+          <div className="kpi">
+            <h3>Detail Rows</h3>
+            <p>{workspace?.details?.length || 0}</p>
+          </div>
+          <div className="kpi">
+            <h3>Pending</h3>
+            <p>{workspace?.pendingItems?.length || 0}</p>
+          </div>
+        </div>
+
+        <div className="chip-list mt-3">
+          {(workspace?.summary || []).map((row) => (
+            <span key={row.StatusCode} className="chip">
+              {statusLabel(row.StatusCode)}: {row.ItemCount}
+            </span>
+          ))}
+          {!workspace?.summary?.length ? <span className="muted text-sm">No summary rows.</span> : null}
+        </div>
       </section>
 
       <section className="panel">
-        <h3 className="mb-2.5">3) Count Entry (Web: select Cost Center + Asset)</h3>
-        <form onSubmit={onSubmitCount}>
+        <h3 className="mb-2.5">2) Count Asset</h3>
+
+        <div className="form-grid">
+          <div className="field">
+            <label>Scan Code</label>
+            <input
+              value={scanValue}
+              onChange={(event) => setScanValue(event.target.value)}
+              placeholder="QR|...|ASSET_NO or BARCODE or Asset No"
+            />
+          </div>
+          <div className="field self-end">
+            <button className="button button--ghost" type="button" onClick={onUseScannedCode}>
+              Use Scan Code
+            </button>
+          </div>
+
+          <div className="field">
+            <label>Search Asset</label>
+            <input
+              value={assetSearch}
+              onChange={(event) => setAssetSearch(event.target.value)}
+              placeholder="Asset No / Name"
+            />
+          </div>
+          <div className="field self-end">
+            <button
+              className="button button--ghost"
+              type="button"
+              disabled={assetLoading}
+              onClick={() => loadAssets(assetSearch.trim(), true)}
+            >
+              {assetLoading ? "Searching..." : "Search"}
+            </button>
+          </div>
+        </div>
+
+        <form className="mt-3" onSubmit={onScanSubmit}>
           <div className="form-grid">
             <div className="field">
-              <label>Cost Center</label>
-              <select value={countCostCenter} onChange={(e) => setCountCostCenter(e.target.value)}>
-                {!costCenters.length ? <option value="">No cost center</option> : null}
-                {costCenters.map((cca) => (
-                  <option key={cca} value={cca}>
-                    {cca}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
               <label>Asset</label>
-              <select value={assetNo} onChange={(e) => setAssetNo(e.target.value)}>
-                {!assetsInCostCenter.length ? <option value="">No assets in selected cost center</option> : null}
-                {assetsInCostCenter.map((asset) => (
-                  <option key={asset.AssetId} value={asset.AssetNo}>
+              <select value={selectedAssetId} onChange={(event) => setSelectedAssetId(event.target.value)}>
+                <option value="">Select asset</option>
+                {assetRows.map((asset) => (
+                  <option key={asset.AssetId} value={asset.AssetId}>
                     {asset.AssetNo} - {asset.AssetName}
                   </option>
                 ))}
               </select>
             </div>
+
             <div className="field">
-              <label>Status Code</label>
-              <select value={statusCode} onChange={(e) => setStatusCode(e.target.value as StocktakeRecordView["StatusCode"])}>
+              <label>Status</label>
+              <select value={scanStatusCode} onChange={(event) => setScanStatusCode(event.target.value)}>
                 {statusOptions.map((code) => (
                   <option key={code} value={code}>
-                    {code}
+                    {statusLabel(code)}
                   </option>
                 ))}
               </select>
             </div>
+
             <div className="field">
               <label>Method</label>
-              <select value={countMethod} onChange={(e) => setCountMethod(e.target.value as StocktakeRecordView["CountMethod"])}>
+              <select
+                value={countMethod}
+                onChange={(event) => setCountMethod(event.target.value as CountMethod)}
+              >
                 <option value="QR">QR</option>
+                <option value="BARCODE">BARCODE</option>
                 <option value="MANUAL">MANUAL</option>
                 <option value="EXCEL">EXCEL</option>
               </select>
             </div>
-            <div className="field">
-              <label>Qty</label>
-              <input type="number" min={1} value={countQty} onChange={(e) => setCountQty(Number(e.target.value))} />
-            </div>
-            <div className="field">
-              <label>Counted By</label>
-              <input value={countedBy} onChange={(e) => setCountedBy(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Image Names (comma)</label>
-              <input value={imageNames} onChange={(e) => setImageNames(e.target.value)} placeholder="a.jpg,b.jpg" />
-            </div>
+
             <div className="field">
               <label>Note</label>
-              <input value={noteText} onChange={(e) => setNoteText(e.target.value)} />
+              <input value={noteText} onChange={(event) => setNoteText(event.target.value)} />
             </div>
           </div>
+
           <div className="mt-3">
-            <button className="button button--primary" type="submit">
-              Save Count
+            <UploadFileControl
+              id="stocktake-evidence-image"
+              label="Evidence Image (required)"
+              fileLabel={scanFileLabel}
+              accept="image/*"
+              buttonText="Choose image"
+              onFileChange={(file) => setScanImageFile(file)}
+            />
+          </div>
+
+          <div className="chip-list mt-3">
+            <button className="button button--primary" type="submit" disabled={scanBusy}>
+              {scanBusy ? "Saving..." : "Save Count"}
             </button>
           </div>
+
+          {selectedAsset ? (
+            <p className="muted mt-2 text-sm">
+              {selectedAsset.AssetNo} | {selectedAsset.AssetName} | {formatMoney(Number(selectedAsset.BookValue || 0))}
+            </p>
+          ) : null}
         </form>
+
+        {scanNotice ? <div className={`mt-3 ${noticeClassName(scanNotice.tone)}`}>{scanNotice.text}</div> : null}
       </section>
 
       <section className="panel">
-        <h3 className="mb-2.5">4) Import Count from Excel (CSV)</h3>
-        <UploadFileControl
-          id="stocktake-count-import-file"
-          label="Upload file (.csv)"
-          fileLabel={countImportFileLabel}
-          accept=".csv,.txt"
-          buttonText="เลือกไฟล์"
-          helperText="รูปแบบที่รองรับ: assetNo,statusCode,note,method,qty"
-          onFileChange={(file) => onImportCsvFile(file)}
-        />
-        <div className="field mt-2.5">
-          <label>CSV: assetNo,statusCode,note,method,qty</label>
-          <textarea value={csvText} onChange={(e) => setCsvText(e.target.value)} />
-        </div>
-        <div className="chip-list mt-3">
-          <button className="button button--ghost" type="button" onClick={onImportCsv}>
-            Import Count CSV
-          </button>
-          <button
-            className="button button--ghost"
-            type="button"
-            onClick={() =>
-              downloadTextFile(
-                "stocktake-count-template.csv",
-                "assetNo,statusCode,note,method,qty\n100-001-2020,COUNTED,checked,EXCEL,1\n100-017-2019,PENDING,recheck tomorrow,MANUAL,1",
-              )
-            }
-          >
-            Download Template
-          </button>
-        </div>
-      </section>
+        <h3 className="mb-2.5">3) Import Count File</h3>
 
-      <section className="panel">
-        <h3 className="mb-2.5">5) Import Accounting Status (SUBMIT/APPROVED/REJECT)</h3>
-        <UploadFileControl
-          id="stocktake-accounting-import-file"
-          label="Upload accounting file (.csv)"
-          fileLabel={accountingImportFileLabel}
-          accept=".csv,.txt"
-          buttonText="เลือกไฟล์"
-          helperText="เลือกไฟล์แล้วระบบจะเติมข้อมูลลงช่อง CSV ด้านล่างอัตโนมัติ"
-          onFileChange={(file) => onImportAccountingFile(file)}
-        />
-        <div className="field mt-2.5">
-          <label>CSV: assetNo,accountingStatusCode</label>
-          <textarea value={accountingCsvText} onChange={(e) => setAccountingCsvText(e.target.value)} />
-        </div>
-        <div className="chip-list mt-3">
-          <button className="button button--ghost" type="button" onClick={onImportAccountingCsv}>
-            Import Accounting Status
-          </button>
-          <button
-            className="button button--ghost"
-            type="button"
-            onClick={() =>
-              downloadTextFile(
-                "stocktake-accounting-template.csv",
-                "100-001-2020,SUBMIT\n100-017-2019,APPROVED\n200-552-2017,REJECT",
-              )
-            }
-          >
-            Download Template
-          </button>
-        </div>
-      </section>
-
-      <section className="panel">
-        <h3 className="mb-2.5">6) Participants and Meeting Documents</h3>
         <div className="form-grid">
           <div className="field">
-            <label>Participant Email</label>
-            <input value={participantEmail} onChange={(e) => setParticipantEmail(e.target.value)} />
+            <label>Import Method</label>
+            <select
+              value={importMethod}
+              onChange={(event) => setImportMethod(event.target.value as CountMethod)}
+            >
+              <option value="EXCEL">EXCEL</option>
+              <option value="MANUAL">MANUAL</option>
+              <option value="QR">QR</option>
+              <option value="BARCODE">BARCODE</option>
+            </select>
           </div>
-          <div className="field">
-            <label>Meeting Document Name</label>
-            <input value={meetingDocName} onChange={(e) => setMeetingDocName(e.target.value)} />
+          <div className="field self-end">
+            <button className="button button--ghost" type="button" disabled={importBusy} onClick={onImportSubmit}>
+              {importBusy ? "Importing..." : "Import"}
+            </button>
           </div>
         </div>
-        <div className="chip-list mt-3">
-          <button
-            className="button button--ghost"
-            type="button"
-            onClick={() => {
-              if (!participantEmail.trim()) return;
-              addMockStocktakeParticipant({
-                plantId,
-                stocktakeYear,
-                email: participantEmail.trim(),
-              });
-              setParticipantEmail("");
-              notify("Added participant.", "success");
-            }}
-          >
-            Add Participant
-          </button>
-          <button
-            className="button button--ghost"
-            type="button"
-            onClick={() => {
-              if (!meetingDocName.trim()) return;
-              addMockStocktakeMeetingDoc({
-                plantId,
-                stocktakeYear,
-                fileName: meetingDocName.trim(),
-              });
-              setMeetingDocName("");
-              notify("Added meeting document.", "success");
-            }}
-          >
-            Add Meeting Doc
-          </button>
+
+        <div className="mt-3">
+          <UploadFileControl
+            id="stocktake-import-file"
+            label="Import File (.csv/.xlsx/.xls/.txt)"
+            fileLabel={importFileLabel}
+            accept=".csv,.xlsx,.xls,.txt"
+            buttonText="Choose file"
+            onFileChange={(file) => setImportFile(file)}
+          />
         </div>
-        <div className="table-wrap mt-2.5">
+
+        {importNotice ? <div className={`mt-3 ${noticeClassName(importNotice.tone)}`}>{importNotice.text}</div> : null}
+      </section>
+
+      <section className="panel">
+        <h3 className="mb-2.5">4) Pending Items</h3>
+        <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <th>Participants</th>
-                <th>Actions</th>
+                <th>Asset No</th>
+                <th>Asset Name</th>
+                <th>Book Value</th>
+                <th>Note</th>
+                <th>Counted At</th>
               </tr>
             </thead>
             <tbody>
-              {workspace.participants.map((participant) => (
-                <tr key={participant.StocktakeParticipantId}>
-                  <td>
-                    {participant.DisplayName} ({participant.Email})
-                  </td>
-                  <td>
-                    <button
-                      className="button button--ghost"
-                      type="button"
-                      onClick={() => {
-                        removeMockStocktakeParticipant(participant.StocktakeParticipantId);
-                        notify("Removed participant.", "success");
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </td>
+              {(workspace?.pendingItems || []).map((row, index) => (
+                <tr key={`${row.AssetNo}-${index}`}>
+                  <td>{row.AssetNo}</td>
+                  <td>{row.AssetName}</td>
+                  <td>{formatMoney(Number(row.BookValue || 0))}</td>
+                  <td>{row.NoteText || "-"}</td>
+                  <td>{formatDate(row.CountedAt)}</td>
                 </tr>
               ))}
-              {!workspace.participants.length ? (
+              {!workspace?.pendingItems?.length ? (
                 <tr>
-                  <td colSpan={2}>No participants.</td>
+                  <td colSpan={5}>No pending items.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -727,86 +655,43 @@ export default function StocktakePageView() {
       </section>
 
       <section className="panel">
-        <h3 className="mb-2.5">7) Summary and 3-tabs Status Report</h3>
-        <div className="chip-list">
-          {workspace.summary.map((row) => (
-            <span className="chip" key={row.StatusCode}>
-              {row.StatusCode}: {row.ItemCount}
-            </span>
-          ))}
-        </div>
-        <div className="chip-list mt-2.5">
-          {workspace.accountingSummary.map((row) => (
-            <span className="chip" key={row.StatusCode}>
-              Accounting {row.StatusCode}: {row.ItemCount}
-            </span>
-          ))}
-        </div>
-        <div className="chip-list mt-2.5">
-          <span className="chip">Counted: {tabs.counted.length}</span>
-          <span className="chip">Not Counted: {tabs.notCounted.length}</span>
-          <span className="chip">Pending/Rejected: {tabs.rejected.length}</span>
-        </div>
-      </section>
+        <h3 className="mb-2.5">5) Count Details</h3>
+        {loadingWorkspace ? <p className="muted mb-2 text-sm">Loading...</p> : null}
 
-      <section className="panel">
-        <h3 className="mb-2.5">8) Count Records</h3>
-        <div className="form-grid">
-          <div className="field">
-            <label>Search</label>
-            <input value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Status</label>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="ALL">ALL</option>
-              {statusOptions.map((x) => (
-                <option key={x} value={x}>
-                  {x}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="table-wrap mt-2.5">
+        <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
                 <th>Asset</th>
                 <th>Status</th>
-                <th>Accounting</th>
                 <th>Method</th>
-                <th>Qty</th>
                 <th>Book Value</th>
                 <th>Counted By</th>
                 <th>Counted At</th>
+                <th>Images</th>
                 <th>Note</th>
               </tr>
             </thead>
             <tbody>
-              {filteredRecords.map((row) => (
-                <tr key={row.StocktakeRecordId}>
+              {(workspace?.details || []).map((row) => (
+                <tr key={`${row.AssetId}-${row.CountedAt || "na"}`}>
                   <td>
                     {row.AssetNo} - {row.AssetName}
-                    <p className="muted">
-                      {row.CostCenterName} / {row.LocationName}
-                    </p>
                   </td>
                   <td>
                     <StatusChip status={row.StatusCode} />
                   </td>
-                  <td>{row.AccountingStatusCode || "-"}</td>
-                  <td>{row.CountMethod}</td>
-                  <td>{row.CountedQty}</td>
-                  <td>{formatMoney(row.BookValue)}</td>
-                  <td>{row.CountedByName}</td>
+                  <td>{row.CountMethod || "-"}</td>
+                  <td>{formatMoney(Number(row.BookValue || 0))}</td>
+                  <td>{row.CountedByName || row.CountedByEmail || "-"}</td>
                   <td>{formatDate(row.CountedAt)}</td>
+                  <td>{row.ImageCount || 0}</td>
                   <td>{row.NoteText || "-"}</td>
                 </tr>
               ))}
-              {!filteredRecords.length ? (
+              {!workspace?.details?.length ? (
                 <tr>
-                  <td colSpan={9}>No records.</td>
+                  <td colSpan={8}>No detail rows.</td>
                 </tr>
               ) : null}
             </tbody>

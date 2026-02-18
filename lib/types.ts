@@ -171,11 +171,38 @@ export interface StocktakeDetailRow {
   BookValue: number;
   StatusCode: string;
   StatusName: string;
-  CountMethod: "QR" | "MANUAL" | "EXCEL";
+  CountMethod: "QR" | "BARCODE" | "MANUAL" | "EXCEL";
   CountedAt: string;
+  CountedByEmail?: string;
   CountedByName: string;
   NoteText?: string;
   ImageCount: number;
+}
+
+export interface StocktakeWorkspaceConfig {
+  stocktakeYearConfigId: string;
+  isOpen: boolean;
+  reportGeneratedAt?: string | null;
+  closedAt?: string | null;
+  closedByUserId?: string | null;
+}
+
+export interface StocktakePendingRow {
+  AssetNo: string;
+  AssetName: string;
+  BookValue?: number | null;
+  NoteText?: string | null;
+  CountedAt?: string | null;
+}
+
+export interface StocktakeWorkspaceData {
+  stocktakeId: string;
+  plantId: string;
+  stocktakeYear: number;
+  config: StocktakeWorkspaceConfig | null;
+  summary: StocktakeSummaryRow[];
+  details: StocktakeDetailRow[];
+  pendingItems: StocktakePendingRow[];
 }
 
 export interface SapSyncQueueRow {
@@ -352,7 +379,7 @@ export interface StocktakeRecordView {
   StatusName: string;
   AccountingStatusCode?: StocktakeAccountingStatusCode;
   AccountingStatusName?: string;
-  CountMethod: "QR" | "MANUAL" | "EXCEL";
+  CountMethod: "QR" | "BARCODE" | "MANUAL" | "EXCEL";
   CountedQty: number;
   CountedAt: string;
   CountedByName: string;
